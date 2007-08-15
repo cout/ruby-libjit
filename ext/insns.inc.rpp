@@ -1,0 +1,156 @@
+#ruby <<END
+
+V = :value
+L = :label
+_ = :void
+
+def incoming_args(arg_types)
+  num_args = arg_types.length
+  return (1..num_args).map { |n| "VALUE arg#{n}" }.join(', ');
+end
+
+def declaration(name, type)
+  case type
+  when V then return "jit_value_t #{name};"
+  when L then return "jit_label_t * #{name};"
+  when :void then nil
+  else raise "Invalid type #{type}"
+  end
+end
+
+def write_declaration(name, type, indent)
+  d = declaration(name, type)
+  if d then
+    puts "#{' '*indent}#{d}"
+  end
+end
+
+def ruby_type(type)
+  case type
+  when V then return "rb_cValue"
+  when L then return "rb_cLabel"
+  else raise "Invalid type #{type}"
+  end
+end
+
+def jit_type(type)
+  case type
+  when V then return "struct _jit_value"
+  when L then return "jit_label_t"
+  else raise "Invalid type #{type}"
+  end
+end
+
+def jit_insn_args(arg_types)
+  num_args = arg_types.length
+  return (1..num_args).map { |n| "j_arg#{n}" }.join(', ');
+end
+
+def write_insn(name, retval_type, arg_types)
+  num_args = arg_types.length
+  puts "static VALUE function_insn_#{name}(VALUE self, #{incoming_args(arg_types)})"
+  puts "{"
+  puts "  jit_function_t function;"
+  write_declaration('retval', retval_type, 2)
+  arg_types.each_with_index do |type, n|
+    write_declaration("j_arg#{n+1}", type, 2)
+  end
+  puts
+  arg_types.each_with_index do |type, n|
+    puts "  check_type(\"arg#{n+1}\", #{ruby_type(type)}, arg#{n+1});"
+  end
+  puts
+  puts "  Data_Get_Struct(self, struct _jit_function, function);"
+  arg_types.each_with_index do |type, n|
+    puts "  Data_Get_Struct(arg#{n+1}, #{jit_type(type)}, j_arg#{n+1});"
+  end
+  puts
+  if retval_type == V then
+    puts "  retval = jit_insn_#{name}(function, #{jit_insn_args(arg_types)});"
+    puts "  return Data_Wrap_Struct(rb_cValue, 0, 0, retval);"
+  elsif retval_type == :void then
+    puts "  jit_insn_#{name}(function, #{jit_insn_args(arg_types)});"
+    puts "  return Qnil;"
+  else
+    raise "Invalid retval type #{retval_type}"
+  end
+  puts "}"
+end
+
+insns = [
+  [ 'add'           , V, V, V ] , 
+  [ 'add_ovf'       , V, V, V ] , 
+  [ 'sub'           , V, V, V ] , 
+  [ 'sub_ovf'       , V, V, V ] , 
+  [ 'mul'           , V, V, V ] , 
+  [ 'mul_ovf'       , V, V, V ] , 
+  [ 'div'           , V, V, V ] , 
+  [ 'rem'           , V, V, V ] , 
+  [ 'rem_ieee'      , V, V, V ] , 
+  [ 'neg'           , V, V    ] , 
+  [ 'and'           , V, V, V ] , 
+  [ 'or'            , V, V, V ] , 
+  [ 'xor'           , V, V, V ] , 
+  [ 'not'           , V, V    ] , 
+  [ 'shl'           , V, V, V ] , 
+  [ 'shr'           , V, V, V ] , 
+  [ 'ushr'          , V, V, V ] , 
+  [ 'sshr'          , V, V, V ] , 
+  [ 'eq'            , V, V, V ] , 
+  [ 'ne'            , V, V, V ] , 
+  [ 'lt'            , V, V, V ] , 
+  [ 'le'            , V, V, V ] , 
+  [ 'gt'            , V, V, V ] , 
+  [ 'ge'            , V, V, V ] , 
+  [ 'cmpl'          , V, V, V ] , 
+  [ 'cmpg'          , V, V, V ] , 
+  [ 'to_bool'       , V, V    ] , 
+  [ 'to_not_bool'   , V, V    ] , 
+  [ 'acos'          , V, V    ] , 
+  [ 'asin'          , V, V    ] , 
+  [ 'atan'          , V, V    ] , 
+  [ 'atan2'         , V, V, V ] ,
+  [ 'ceil'          , V, V    ] , 
+  [ 'cos'           , V, V    ] , 
+  [ 'cosh'          , V, V    ] , 
+  [ 'exp'           , V, V    ] , 
+  [ 'floor'         , V, V    ] , 
+  [ 'log'           , V, V    ] , 
+  [ 'log10'         , V, V    ] , 
+  [ 'pow'           , V, V, V ] ,
+  [ 'rint'          , V, V    ] , 
+  [ 'round'         , V, V    ] , 
+  [ 'sin'           , V, V    ] , 
+  [ 'sinh'          , V, V    ] , 
+  [ 'sqrt'          , V, V    ] , 
+  [ 'tan'           , V, V    ] , 
+  [ 'tanh'          , V, V    ] , 
+  [ 'is_nan'        , V, V    ] , 
+  [ 'is_finite'     , V, V    ] , 
+  [ 'is_inf'        , V, V    ] , 
+  [ 'abs'           , V, V    ] , 
+  [ 'min'           , V, V, V ] , 
+  [ 'max'           , V, V, V ] , 
+  [ 'sign'          , V, V    ] , 
+  [ 'return'        , _, V    ] ,
+  [ 'branch'        , _, L    ] ,
+  [ 'branch_if'     , _, V, L ] ,
+  [ 'branch_if_not' , _, V, L ] ,
+  [ 'label'         , _, L    ] ,
+]
+
+insns.each do |name, retval_type, *arg_types|
+  write_insn(name, retval_type, arg_types)
+  puts
+end
+
+puts "static void init_insns()"
+puts "{"
+insns.each do |name, retval_type, *arg_types|
+  num_args = arg_types.length
+  puts "  rb_define_method(rb_cFunction, \"insn_#{name}\", function_insn_#{name}, #{num_args});"
+end
+puts "}"
+
+END
+
