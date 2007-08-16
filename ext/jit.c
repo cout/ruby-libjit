@@ -10,6 +10,11 @@ static VALUE rb_cValue;
 static VALUE rb_cLabel;
 static VALUE rb_mCall;
 
+enum User_Defined_Tag
+{
+  OBJECT_TAG,
+};
+
 static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 {
   if(CLASS_OF(val) != expected_klass)
@@ -30,7 +35,10 @@ static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 static VALUE context_s_new(VALUE klass)
 {
   jit_context_t context = jit_context_create();
-  return Data_Wrap_Struct(rb_cContext, 0, jit_context_destroy, context);
+  VALUE context_obj =
+    Data_Wrap_Struct(rb_cContext, 0, jit_context_destroy, context);
+  rb_iv_set(context_obj, "@functions", rb_ary_new());
+  return context_obj;
 }
 
 static VALUE context_build(VALUE self)
@@ -56,14 +64,23 @@ static VALUE function_s_new(VALUE klass, VALUE context, VALUE signature)
   jit_function_t function;
   jit_context_t jit_context;
   jit_type_t jit_signature;
+  VALUE function_obj;
+  VALUE functions;
 
   Data_Get_Struct(context, struct _jit_context, jit_context);
   Data_Get_Struct(signature, struct _jit_type, jit_signature);
 
   function = jit_function_create(jit_context, jit_signature);
 
-  /* TODO: functions never get freed? */
-  return Data_Wrap_Struct(rb_cFunction, 0, 0, function);
+  function_obj = Data_Wrap_Struct(rb_cFunction, 0, 0, function);
+
+  /* Make sure the function is around as long as the context is */
+  functions = rb_iv_get(context, "@functions");
+  rb_ary_push(functions, function_obj);
+
+  rb_iv_set(function_obj, "@value_objects", rb_ary_new());
+
+  return function_obj;
 }
 
 static VALUE function_compile(VALUE self)
@@ -144,8 +161,14 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   Data_Get_Struct(self, struct _jit_function, function);
   signature = jit_function_get_signature(function);
   n = jit_type_num_params(signature);
+
+  /* void pointers to each of the arguments */
   args = ALLOCA_N(void *, n);
-  arg_data = (char *)ALLOCA_N(int, n); /* TODO */
+
+  /* the actual data */
+  /* TODO: we need to allocate the proper size (but 8 bytes per arg
+   * should be sufficient for now) */
+  arg_data = (char *)ALLOCA_N(char, 8 * n);
 
   for(j = 0; j < n; ++j)
   {
@@ -161,16 +184,49 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         break;
       }
 
+      case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
+      {
+        *(VALUE *)arg_data = argv[j];
+        args[j] = (VALUE *)arg_data;
+        arg_data += sizeof(VALUE);
+        break;
+      }
+
       default:
-        rb_raise(rb_eTypeError, "Unsupported type");
+        rb_raise(rb_eTypeError, "Unsupported type %d", kind);
     }
   }
 
-  jit_int result; /* TODO */
-  jit_function_apply(function, args, &result);
-  return INT2NUM(result); /* TODO */
+  /* TODO: don't assume that all functions return int */
+
+  {
+    jit_type_t return_type = jit_type_get_return(signature);
+    int return_kind = jit_type_get_kind(return_type);
+    switch(return_kind)
+    {
+      case JIT_TYPE_INT:
+      {
+        jit_int result;
+        jit_function_apply(function, args, &result);
+        return INT2NUM(result);
+      }
+
+      case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
+      {
+        jit_ulong result;
+        jit_function_apply(function, args, &result);
+        return result;
+      }
+
+      default:
+        rb_raise(rb_eTypeError, "Unsupported return type %d", return_kind);
+    }
+  }
 }
 
+/* If passed one value, create a value with jit_value_create.
+ * If passed two values, create a constant with the given value.
+ */
 static VALUE function_value(int argc, VALUE * argv, VALUE self)
 {
   VALUE type;
@@ -205,6 +261,21 @@ static VALUE function_value(int argc, VALUE * argv, VALUE self)
         break;
       }
 
+      case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
+      {
+        jit_constant_t c;
+        VALUE value_objects = rb_iv_get(self, "@value_objects");
+
+        c.type = j_type;
+        c.un.ulong_value = constant;
+        v = jit_value_create_constant(function, &c);
+
+        /* Make sure the object gets marked as long as the function is
+         * around */
+        rb_ary_push(value_objects, constant);
+        break;
+      }
+
       default:
         rb_raise(rb_eTypeError, "Unsupported type");
     }
@@ -233,7 +304,7 @@ static VALUE function_set_optimization_level(VALUE self, VALUE level)
  * ---------------------------------------------------------------------------
  */
 
-static VALUE jit_type(jit_type_t type)
+static VALUE wrap_type(jit_type_t type)
 {
   return Data_Wrap_Struct(rb_cType, 0, jit_type_free, type);
 }
@@ -309,21 +380,23 @@ void Init_jit()
 
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
-  rb_define_const(rb_cType, "VOID", jit_type(jit_type_void));
-  rb_define_const(rb_cType, "SBYTES", jit_type(jit_type_sbyte));
-  rb_define_const(rb_cType, "UBYTE", jit_type(jit_type_ubyte));
-  rb_define_const(rb_cType, "SHORT", jit_type(jit_type_short));
-  rb_define_const(rb_cType, "USHORT", jit_type(jit_type_ushort));
-  rb_define_const(rb_cType, "INT", jit_type(jit_type_int));
-  rb_define_const(rb_cType, "UINT", jit_type(jit_type_uint));
-  rb_define_const(rb_cType, "NINT", jit_type(jit_type_nint));
-  rb_define_const(rb_cType, "NUINT", jit_type(jit_type_nuint));
-  rb_define_const(rb_cType, "LONG", jit_type(jit_type_long));
-  rb_define_const(rb_cType, "ULONG", jit_type(jit_type_ulong));
-  rb_define_const(rb_cType, "FLOAT32", jit_type(jit_type_float32));
-  rb_define_const(rb_cType, "FLOAT64", jit_type(jit_type_float64));
-  rb_define_const(rb_cType, "NFLOAT", jit_type(jit_type_nfloat));
-  rb_define_const(rb_cType, "VOID_PTR", jit_type(jit_type_void_ptr));
+  rb_define_const(rb_cType, "VOID", wrap_type(jit_type_void));
+  rb_define_const(rb_cType, "SBYTES", wrap_type(jit_type_sbyte));
+  rb_define_const(rb_cType, "UBYTE", wrap_type(jit_type_ubyte));
+  rb_define_const(rb_cType, "SHORT", wrap_type(jit_type_short));
+  rb_define_const(rb_cType, "USHORT", wrap_type(jit_type_ushort));
+  rb_define_const(rb_cType, "INT", wrap_type(jit_type_int));
+  rb_define_const(rb_cType, "UINT", wrap_type(jit_type_uint));
+  rb_define_const(rb_cType, "NINT", wrap_type(jit_type_nint));
+  rb_define_const(rb_cType, "NUINT", wrap_type(jit_type_nuint));
+  rb_define_const(rb_cType, "LONG", wrap_type(jit_type_long));
+  rb_define_const(rb_cType, "ULONG", wrap_type(jit_type_ulong));
+  rb_define_const(rb_cType, "FLOAT32", wrap_type(jit_type_float32));
+  rb_define_const(rb_cType, "FLOAT64", wrap_type(jit_type_float64));
+  rb_define_const(rb_cType, "NFLOAT", wrap_type(jit_type_nfloat));
+  rb_define_const(rb_cType, "VOID_PTR", wrap_type(jit_type_void_ptr));
+  rb_define_const(rb_cType, "OBJECT", wrap_type(jit_type_create_tagged(
+              jit_type_ulong, OBJECT_TAG, 0, 0, 1)));
 
   rb_mABI = rb_define_module_under(rb_mJIT, "ABI");
   rb_define_const(rb_mABI, "CDECL", INT2NUM(jit_abi_cdecl));
