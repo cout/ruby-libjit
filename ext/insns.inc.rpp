@@ -78,6 +78,7 @@ def write_insn(name, retval_type, arg_types)
 end
 
 insns = [
+  [ 'store'         , _, V, V ] ,
   [ 'add'           , V, V, V ] , 
   [ 'add_ovf'       , V, V, V ] , 
   [ 'sub'           , V, V, V ] , 
