@@ -17,6 +17,8 @@ static VALUE rb_mCall;
 static jit_type_t jit_type_VALUE;
 static jit_type_t jit_type_ID;
 
+static jit_type_t ruby_vararg_signature;
+
 /* TODO: this might not be right for 64-bit systems */
 typedef jit_uint jit_VALUE;
 #define jit_underlying_type_VALUE jit_type_uint
@@ -25,16 +27,20 @@ typedef jit_uint jit_ID;
 #define jit_underlying_type_ID jit_type_uint
 #define SET_CONSTANT_ID(c, v) c.un.uint_value = v;
 
+/* TODO: Need better (more consistent) names for these */
 enum User_Defined_Tag
 {
   OBJECT_TAG,
   ID_TAG,
+  RUBY_VARARG_SIGNATURE_TAG,
 };
 
+/* TODO: Need better (more consistent) names for these */
 enum Meta_Tag
 {
   VALUE_OBJECTS,
   FUNCTIONS,
+  TAG_FOR_SIGNATURE,
 };
 
 static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
@@ -97,17 +103,31 @@ static VALUE function_s_new(VALUE klass, VALUE context, VALUE signature)
   jit_function_t function;
   jit_context_t jit_context;
   jit_type_t jit_signature;
+  jit_type_t jit_real_signature;
   VALUE function_obj;
   VALUE functions;
+  int signature_tag;
 
   Data_Get_Struct(context, struct _jit_context, jit_context);
   Data_Get_Struct(signature, struct _jit_type, jit_signature);
 
+  signature_tag = jit_type_get_kind(jit_signature);
+
+  if((jit_real_signature = jit_type_get_tagged_type(jit_signature)))
+  {
+    jit_signature = jit_real_signature;
+  }
+
   function = jit_function_create(jit_context, jit_signature);
 
   /* Make sure the function is around as long as the context is */
-
   if(!jit_function_set_meta(function, VALUE_OBJECTS, (void *)rb_ary_new(), 0, 0))
+  {
+    rb_raise(rb_eNoMemError, "Out of memory");
+  }
+
+  /* Remember the signature's tag for later */
+  if(!jit_function_set_meta(function, TAG_FOR_SIGNATURE, (void *)signature_tag, 0, 0))
   {
     rb_raise(rb_eNoMemError, "Out of memory");
   }
@@ -178,6 +198,10 @@ static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
   {
     jit_value_t arg;
     Data_Get_Struct(RARRAY(args)->ptr[j], struct _jit_value, arg);
+    if(!arg)
+    {
+      rb_raise(rb_eArgError, "Argument %d is invalid", j);
+    }
     j_args[j] = arg;
   }
   j_flags = NUM2INT(flags);
@@ -216,6 +240,10 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   {
     jit_value_t arg;
     Data_Get_Struct(RARRAY(args)->ptr[j], struct _jit_value, arg);
+    if(!arg)
+    {
+      rb_raise(rb_eArgError, "Argument %d is invalid", j);
+    }
     j_args[j] = arg;
   }
   j_flags = NUM2INT(flags);
@@ -309,6 +337,19 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   /* TODO: we need to allocate the proper size (but 8 bytes per arg
    * should be sufficient for now) */
   arg_data = (char *)ALLOCA_N(char, 8 * n);
+
+  {
+    int signature_tag = (int)jit_function_get_meta(function, TAG_FOR_SIGNATURE);
+    if(signature_tag == JIT_TYPE_FIRST_TAGGED + RUBY_VARARG_SIGNATURE_TAG)
+    {
+      jit_uint result;
+      VALUE f_self = *(VALUE *)argv;
+      VALUE * f_argv = ((VALUE *)argv) + 1;
+      void * f_args[3] = { &n, &f_argv, &f_self };
+      jit_function_apply(function, f_args, &result);
+      return result;
+    }
+  }
 
   /* TODO: validate the number of args passed in */
   for(j = 0; j < n; ++j)
@@ -642,6 +683,8 @@ static VALUE label_s_new(VALUE klass)
 
 static VALUE module_define_libjit_method(VALUE klass, VALUE name, VALUE function, VALUE arity)
 {
+  /* TODO: I think that by using a closure here, we have a memory leak
+   * if the method is ever redefined. */
   char const * c_name = STR2CSTR(name);
   jit_function_t j_function;
   Data_Get_Struct(function, struct _jit_function, j_function);
@@ -708,6 +751,18 @@ void Init_jit()
 
   jit_type_ID = jit_type_create_tagged(jit_underlying_type_ID, ID_TAG, 0, 0, 1);
   rb_define_const(rb_cType, "ID", wrap_type(jit_type_ID));
+
+  {
+    jit_type_t ruby_vararg_param_types[] = { jit_type_int, jit_type_void_ptr, jit_type_VALUE };
+    jit_type_t ruby_vararg_signature_untagged = jit_type_create_signature(
+          jit_abi_cdecl,
+          jit_type_VALUE,
+          ruby_vararg_param_types,
+          3,
+          1);
+    ruby_vararg_signature = jit_type_create_tagged(ruby_vararg_signature_untagged, RUBY_VARARG_SIGNATURE_TAG, 0, 0, 1);
+  }
+  rb_define_const(rb_cType, "RUBY_VARARG_SIGNATURE", wrap_type(ruby_vararg_signature));
 
   rb_mABI = rb_define_module_under(rb_mJIT, "ABI");
   rb_define_const(rb_mABI, "CDECL", INT2NUM(jit_abi_cdecl));

@@ -53,7 +53,7 @@ class Node
 
   class FCALL
     def libjit_compile(function, env)
-      # TODO: need to be able to call private methods
+      # TODO: might be better to use insn_push than alloca/store
       mid = self.mid
       args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
       num_args = function.const(JIT::Type::INT, args.length)
@@ -127,6 +127,12 @@ class Node
       # number of places in eval.c where ruby_set_current_source is
       # called; we need to evaluate a dummy node for each of those
       # cases.
+      # TODO: This breaks tracing, since we don't try to call the the
+      # trace func.
+      # TODO: We might be able to optimize this by keeping a mapping of
+      # instruction offset to source line and only modifying
+      # ruby_sourceline when an exception is raised (or other event that
+      # reads ruby_sourceline).
       ruby_sourceline = function.ruby_sourceline()
       n = function.const(JIT::Type::INT, self.nd_line)
       function.insn_store_relative(ruby_sourceline, 0, n)
@@ -282,21 +288,71 @@ end
 class Method
   def libjit_compile(optimization_level=2)
     env = JIT::NodeCompileEnvironment.new
+
     msig = self.signature
-    signature = JIT::Type.create_signature(
-      self.arity >= 0 ? JIT::ABI::CDECL : JIT::ABI::VARARG,
-      JIT::Type::OBJECT,
-      [ JIT::Type::OBJECT ] * (1 + msig.arg_names.size))
+    if self.arity >= 0 then
+      # all arguments required for this method
+      signature = JIT::Type.create_signature(
+        JIT::ABI::CDECL,
+        JIT::Type::OBJECT,
+        [ JIT::Type::OBJECT ] * (1 + msig.arg_names.size))
+    else
+      # some arguments are optional for this method
+      signature = JIT::Type::RUBY_VARARG_SIGNATURE
+    end
+
     JIT::Context.build do |context|
       function = JIT::Function.compile(context, signature) do |f|
-        env.self = f.get_param(0)
-        msig.arg_names.each_with_index do |arg_name, idx|
-          # TODO: how to deal with default values?
-          env.locals[arg_name] = f.get_param(idx+1)
+        if self.arity >= 0 then
+          # all arguments required for this method
+          env.self = f.get_param(0)
+          msig.arg_names.each_with_index do |arg_name, idx|
+            # TODO: how to deal with default values?
+            env.locals[arg_name] = f.get_param(idx+1)
+          end
+        else
+          # some arguments are optional for this method
+          optional_args = {}
+          args_node = args_node()
+          opt = args_node.opt
+          while opt do
+            vid = opt.head.vid
+            value = opt.head.value
+            optional_args[vid] = value
+            opt = opt.next
+          end
+
+          argc = f.get_param(0)
+          argv = f.get_param(1)
+          env.self = f.get_param(2)
+
+          msig.arg_names.each_with_index do |arg_name, idx|
+            if idx < msig.arg_names.size - optional_args.size then
+              # TODO: use insn_load_elem
+              env.locals[arg_name] = f.insn_load_relative(argv, idx*4, JIT::Type::OBJECT)
+            else
+              var = env.locals[arg_name] = f.value(JIT::Type::OBJECT)
+              var_idx = f.const(JIT::Type::OBJECT, idx)
+              have_this_arg = argc <= var_idx
+              have_this_arg_label = JIT::Label.new
+              next_arg_label = JIT::Label.new
+              f.insn_branch_if(have_this_arg, have_this_arg_label)
+              # this arg was not passed in
+              p optional_args[arg_name]
+              f.insn_store(var, optional_args[arg_name].libjit_compile(f, env))
+              f.insn_branch(next_arg_label)
+              f.insn_label(have_this_arg_label)
+              # this arg was passed in
+              f.insn_store(var, f.insn_load_relative(argv, idx*4, JIT::Type::OBJECT))
+              f.insn_label(next_arg_label)
+            end
+          end
         end
+
         f.optimization_level = optimization_level
         self.body.libjit_compile(f, env)
       end
+
       return function
     end
   end
@@ -339,8 +395,7 @@ def ack(m=0, n=0)
 end
 =end
 
-class Object
-def self.ack(m=0, n=0)
+def ack(m=0, n=0)
   if m == 0 then
     return n + 1
   elsif n == 0 then
@@ -349,14 +404,24 @@ def self.ack(m=0, n=0)
     return ack(m - 1, ack(m, n - 1))
   end
 end
-end
 
 require 'nodepp'
-m = Object.method(:ack)
+m = method(:ack)
 # pp m.body
 f = m.libjit_compile
+# puts f
+puts ack(0, 0)
+p f.apply(self, 0, 0)
+
+=begin
+def foo(m=42)
+  puts m
+end
+
+m = method(:foo)
+f = m.libjit_compile
 puts f
-puts Object.ack(0, 0)
-p f.apply(nil, 0, 0)
+p f.apply(self)
+=end
 
 end

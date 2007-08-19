@@ -38,8 +38,20 @@ module JIT
       return self.function.insn_lt(self, rhs)
     end
 
+    def >(rhs)
+      return self.function.insn_gt(self, rhs)
+    end
+
     def ==(rhs)
       return self.function.insn_eq(self, rhs)
+    end
+
+    def <=(rhs)
+      return self.function.insn_le(self, rhs)
+    end
+
+    def >=(rhs)
+      return self.function.insn_ge(self, rhs)
     end
   end
 end
