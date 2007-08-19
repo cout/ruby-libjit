@@ -17,8 +17,8 @@ class Node
 
       # TODO: This doesn't handle bignums
       binary_fixnum_operators = {
-        :+ => proc { |lhs, rhs| lhs + (rhs & function.value(JIT::Type::INT, ~1)) },
-        :- => proc { |lhs, rhs| lhs - (rhs & function.value(JIT::Type::INT, ~1)) },
+        :+ => proc { |lhs, rhs| lhs + (rhs & function.const(JIT::Type::INT, ~1)) },
+        :- => proc { |lhs, rhs| lhs - (rhs & function.const(JIT::Type::INT, ~1)) },
         :< => proc { |lhs, rhs| lhs < rhs },
         :== => proc { |lhs, rhs| lhs == rhs },
       }
@@ -40,8 +40,8 @@ class Node
         end
       end
 
-      id = function.value(JIT::Type::ID, mid)
-      num_args = function.value(JIT::Type::INT, args.length)
+      id = function.const(JIT::Type::ID, mid)
+      num_args = function.const(JIT::Type::INT, args.length)
       function.insn_store(
         result,
         function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args))
@@ -56,9 +56,9 @@ class Node
       # TODO: need to be able to call private methods
       mid = self.mid
       args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
-      id = function.value(JIT::Type::ID, mid)
-      recv = function.value(JIT::Type::OBJECT, Object)
-      num_args = function.value(JIT::Type::INT, args.length)
+      id = function.const(JIT::Type::ID, mid)
+      recv = function.const(JIT::Type::OBJECT, Object)
+      num_args = function.const(JIT::Type::INT, args.length)
       return function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
     end
   end
@@ -82,15 +82,23 @@ class Node
 
   class CONST
     def libjit_compile(function, env)
-      rb_cObject = function.value(JIT::Type::OBJECT, Object)
-      vid = function.value(JIT::Type::ID, self.vid)
+      rb_cObject = function.const(JIT::Type::OBJECT, Object)
+      vid = function.const(JIT::Type::ID, self.vid)
+      return function.insn_call_native(:rb_const_get, 0, rb_cObject, vid)
+    end
+  end
+
+  class COLON3
+    def libjit_compile(function, env)
+      rb_cObject = function.const(JIT::Type::OBJECT, Object)
+      vid = function.const(JIT::Type::ID, self.vid)
       return function.insn_call_native(:rb_const_get, 0, rb_cObject, vid)
     end
   end
 
   class LIT
     def libjit_compile(function, env)
-      return function.value(JIT::Type::OBJECT, self.lit)
+      return function.const(JIT::Type::OBJECT, self.lit)
     end
   end
 
@@ -100,7 +108,7 @@ class Node
         retval = self.stts.libjit_compile(function, env)
         function.insn_return(retval)
       else
-        retval = function.value(JIT::Type::Object, nil)
+        retval = function.const(JIT::Type::Object, nil)
         function.insn_return(retval)
       end
     end
@@ -127,7 +135,7 @@ class Node
     def libjit_compile(function, env)
       case self.next
       when nil
-      when Node::ARGS, Node::BLOCK_ARG then function.value(JIT::Type::Object, nil)
+      when Node::ARGS, Node::BLOCK_ARG then function.const(JIT::Type::Object, nil)
       else self.next.libjit_compile(function, env)
       end
     end
@@ -192,7 +200,7 @@ class Node
     def libjit_compile(function, env)
       is_false = self.body.to_libjit_inverted_bool(function, env)
       # 0 => 0 (Qfalse); 1 => 2 (Qtrue)
-      one = function.value(JIT::Type::INT, 1)
+      one = function.const(JIT::Type::INT, 1)
       return function.insn_shl(is_false, one)
     end
   end
@@ -200,10 +208,10 @@ class Node
   def to_libjit_inverted_bool(function, env)
     #define RTEST(v) (((VALUE)(v) & ~Qnil) != 0)
     value = self.libjit_compile(function, env)
-    qnil = function.value(JIT::Type::OBJECT, nil)
+    qnil = function.const(JIT::Type::OBJECT, nil)
     not_qnil = function.insn_not(qnil)
     value_and_not_qnil = function.insn_and(value, not_qnil)
-    zero = function.value(JIT::Type::INT, 0)
+    zero = function.const(JIT::Type::INT, 0)
     return function.insn_eq(value_and_not_qnil, zero)
   end
 
@@ -215,19 +223,19 @@ class Node
 
   class STR
     def libjit_compile(function, env)
-      return function.value(JIT::Type::OBJECT, self.lit)
+      return function.const(JIT::Type::OBJECT, self.lit)
     end
   end
 
   class DSTR
     def libjit_compile(function, env)
       # TODO: Use rb_str_new, if String.new is not redefined
-      rb_cString = function.value(JIT::Type::OBJECT, String)
-      id_new = function.value(JIT::Type::ID, :new)
-      id_to_s = function.value(JIT::Type::ID, :to_s)
-      id_lshift = function.value(JIT::Type::ID, :<<)
-      zero = function.value(JIT::Type::INT, 0)
-      one = function.value(JIT::Type::INT, 1)
+      rb_cString = function.const(JIT::Type::OBJECT, String)
+      id_new = function.const(JIT::Type::ID, :new)
+      id_to_s = function.const(JIT::Type::ID, :to_s)
+      id_lshift = function.const(JIT::Type::ID, :<<)
+      zero = function.const(JIT::Type::INT, 0)
+      one = function.const(JIT::Type::INT, 1)
       str = function.insn_call_native(:rb_funcall, 0, rb_cString, id_new, zero)
       a = self.next.to_a
       a.each do |elem|

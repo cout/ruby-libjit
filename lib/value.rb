@@ -4,16 +4,17 @@ module JIT
   class Value
     module UNINITIALIZED; end
 
-    def self.new(function, value=UNINITIALIZED)
+    def self.new(function, type, value=UNINITIALIZED)
+      # TODO: Not sure if I like this...
       if value == UNINITIALIZED then
-        return function.value
+        return function.value(type)
       else
-        return function.value(value)
+        return function.const(type, value)
       end
     end
 
     def is_fixnum
-      fixnum_flag = self.function.value(JIT::Type::INT, 1)
+      fixnum_flag = self.function.const(JIT::Type::INT, 1)
       return self.function.insn_and(self, fixnum_flag)
     end
 

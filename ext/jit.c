@@ -358,67 +358,70 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
 /* If passed one value, create a value with jit_value_create.
  * If passed two values, create a constant with the given value.
  */
-static VALUE function_value(int argc, VALUE * argv, VALUE self)
+static VALUE function_value(VALUE self, VALUE type)
 {
-  VALUE type;
-  VALUE constant;
-
   jit_function_t function;
   jit_type_t j_type;
   jit_value_t v;
-
-  int num_args = rb_scan_args(argc, argv, "11", &type, &constant);
 
   Data_Get_Struct(self, struct _jit_function, function);
 
   check_type("type", rb_cType, type);
   Data_Get_Struct(type, struct _jit_type, j_type);
 
-  if(num_args == 1)
+  v = jit_value_create(function, j_type);
+  return Data_Wrap_Struct(rb_cValue, 0, 0, v);
+}
+
+static VALUE function_const(VALUE self, VALUE type, VALUE constant)
+{
+  jit_function_t function;
+  jit_type_t j_type;
+  jit_value_t v;
+
+  Data_Get_Struct(self, struct _jit_function, function);
+
+  check_type("type", rb_cType, type);
+  Data_Get_Struct(type, struct _jit_type, j_type);
+
+  int kind = jit_type_get_kind(j_type);
+  switch(kind)
   {
-    v = jit_value_create(function, j_type);
-  }
-  else
-  {
-    int kind = jit_type_get_kind(j_type);
-    switch(kind)
+    case JIT_TYPE_INT:
     {
-      case JIT_TYPE_INT:
-      {
-        jit_constant_t c;
-        c.type = j_type;
-        c.un.int_value = NUM2INT(constant);
-        v = jit_value_create_constant(function, &c);
-        break;
-      }
-
-      case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
-      {
-        jit_constant_t c;
-        VALUE value_objects = (VALUE)jit_function_get_meta(function, VALUE_OBJECTS);
-
-        c.type = j_type;
-        SET_CONSTANT_VALUE(c, constant);
-        v = jit_value_create_constant(function, &c);
-
-        /* Make sure the object gets marked as long as the function is
-         * around */
-        rb_ary_push(value_objects, constant);
-        break;
-      }
-
-      case JIT_TYPE_FIRST_TAGGED + ID_TAG:
-      {
-        jit_constant_t c;
-        c.type = j_type;
-        SET_CONSTANT_ID(c, SYM2ID(constant));
-        v = jit_value_create_constant(function, &c);
-        break;
-      }
-
-      default:
-        rb_raise(rb_eTypeError, "Unsupported type");
+      jit_constant_t c;
+      c.type = j_type;
+      c.un.int_value = NUM2INT(constant);
+      v = jit_value_create_constant(function, &c);
+      break;
     }
+
+    case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
+    {
+      jit_constant_t c;
+      VALUE value_objects = (VALUE)jit_function_get_meta(function, VALUE_OBJECTS);
+
+      c.type = j_type;
+      SET_CONSTANT_VALUE(c, constant);
+      v = jit_value_create_constant(function, &c);
+
+      /* Make sure the object gets marked as long as the function is
+       * around */
+      rb_ary_push(value_objects, constant);
+      break;
+    }
+
+    case JIT_TYPE_FIRST_TAGGED + ID_TAG:
+    {
+      jit_constant_t c;
+      c.type = j_type;
+      SET_CONSTANT_ID(c, SYM2ID(constant));
+      v = jit_value_create_constant(function, &c);
+      break;
+    }
+
+    default:
+      rb_raise(rb_eTypeError, "Unsupported type");
   }
 
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
@@ -634,7 +637,8 @@ void Init_jit()
   rb_define_method(rb_cFunction, "insn_call_native", function_insn_call_native, -1);
   rb_define_method(rb_cFunction, "apply", function_apply, -1);
   rb_define_alias(rb_cFunction, "call", "apply");
-  rb_define_method(rb_cFunction, "value", function_value, -1);
+  rb_define_method(rb_cFunction, "value", function_value, 1);
+  rb_define_method(rb_cFunction, "const", function_const, 2);
   rb_define_method(rb_cFunction, "optimization_level", function_optimization_level, 0);
   rb_define_method(rb_cFunction, "optimization_level=", function_set_optimization_level, 1);
   rb_define_singleton_method(rb_cFunction, "max_optimization_level", function_max_optimization_level, 0);
