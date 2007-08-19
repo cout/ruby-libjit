@@ -333,12 +333,11 @@ class Method
             else
               var = env.locals[arg_name] = f.value(JIT::Type::OBJECT)
               var_idx = f.const(JIT::Type::OBJECT, idx)
-              have_this_arg = argc <= var_idx
+              have_this_arg = var_idx <= argc
               have_this_arg_label = JIT::Label.new
               next_arg_label = JIT::Label.new
               f.insn_branch_if(have_this_arg, have_this_arg_label)
               # this arg was not passed in
-              p optional_args[arg_name]
               f.insn_store(var, optional_args[arg_name].libjit_compile(f, env))
               f.insn_branch(next_arg_label)
               f.insn_label(have_this_arg_label)
@@ -395,6 +394,7 @@ def ack(m=0, n=0)
 end
 =end
 
+=begin
 def ack(m=0, n=0)
   if m == 0 then
     return n + 1
@@ -412,16 +412,15 @@ f = m.libjit_compile
 # puts f
 puts ack(0, 0)
 p f.apply(self, 0, 0)
+=end
 
-=begin
 def foo(m=42)
   puts m
 end
 
 m = method(:foo)
 f = m.libjit_compile
-puts f
+# puts f
 p f.apply(self)
-=end
 
 end

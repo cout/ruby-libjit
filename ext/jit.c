@@ -342,10 +342,13 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
     int signature_tag = (int)jit_function_get_meta(function, TAG_FOR_SIGNATURE);
     if(signature_tag == JIT_TYPE_FIRST_TAGGED + RUBY_VARARG_SIGNATURE_TAG)
     {
+      /* TODO: validate the number of args passed in (should be at least
+       * 1) */
       jit_uint result;
+      int f_argc = argc - 1;
       VALUE f_self = *(VALUE *)argv;
       VALUE * f_argv = ((VALUE *)argv) + 1;
-      void * f_args[3] = { &n, &f_argv, &f_self };
+      void * f_args[3] = { &f_argc, &f_argv, &f_self };
       jit_function_apply(function, f_args, &result);
       return result;
     }
