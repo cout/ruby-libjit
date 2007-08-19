@@ -82,9 +82,9 @@ class Node
 
   class CONST
     def libjit_compile(function, env)
-      rb_cObject = function.const(JIT::Type::OBJECT, Object)
+      klass = function.insn_call_native(:rb_class_of, 0, env.self)
       vid = function.const(JIT::Type::ID, self.vid)
-      return function.insn_call_native(:rb_const_get, 0, rb_cObject, vid)
+      return function.insn_call_native(:rb_const_get, 0, klass, vid)
     end
   end
 
@@ -257,9 +257,11 @@ end
 module JIT
   class NodeCompileEnvironment
     attr_reader :locals
+    attr_accessor :self
 
     def initialize
       @locals = {}
+      @self = nil
     end
   end
 end
@@ -274,7 +276,7 @@ class Method
       [ JIT::Type::OBJECT ] * (1 + msig.arg_names.size))
     JIT::Context.build do |context|
       function = JIT::Function.compile(context, signature) do |f|
-        env.locals[:self] = f.get_param(0)
+        env.self = f.get_param(0)
         msig.arg_names.each_with_index do |arg_name, idx|
           # TODO: how to deal with default values?
           p arg_name, idx
