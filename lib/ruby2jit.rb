@@ -51,6 +51,18 @@ class Node
     end
   end
 
+  class FCALL
+    def libjit_compile(function, env)
+      # TODO: need to be able to call private methods
+      mid = self.mid
+      args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
+      id = function.value(JIT::Type::ID, mid)
+      recv = function.value(JIT::Type::OBJECT, Object)
+      num_args = function.value(JIT::Type::INT, args.length)
+      return function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
+    end
+  end
+
   class LASGN
     def libjit_compile(function, env)
       value = self.value.libjit_compile(function, env)
@@ -65,6 +77,14 @@ class Node
   class LVAR
     def libjit_compile(function, env)
       return env.locals[self.vid]
+    end
+  end
+
+  class CONST
+    def libjit_compile(function, env)
+      rb_cObject = function.value(JIT::Type::OBJECT, Object)
+      vid = function.value(JIT::Type::ID, self.vid)
+      return function.insn_call_native(:rb_const_get, 0, rb_cObject, vid)
     end
   end
 
@@ -239,16 +259,17 @@ end
 class Method
   def libjit_compile(optimization_level=2)
     env = JIT::NodeCompileEnvironment.new
+    msig = self.signature
     signature = JIT::Type.create_signature(
       self.arity >= 0 ? JIT::ABI::CDECL : JIT::ABI::VARARG,
       JIT::Type::OBJECT,
-      [ JIT::Type::OBJECT ] * (1 + self.arity.abs))
+      [ JIT::Type::OBJECT ] * (1 + msig.arg_names.size))
     JIT::Context.build do |context|
       function = JIT::Function.compile(context, signature) do |f|
-        msig = self.signature
         env.locals[:self] = f.get_param(0)
         msig.arg_names.each_with_index do |arg_name, idx|
           # TODO: how to deal with default values?
+          p arg_name, idx
           env.locals[arg_name] = f.get_param(idx+1)
         end
         f.optimization_level = optimization_level
@@ -261,6 +282,7 @@ end
 
 if __FILE__ == $0 then
 
+=begin
 def gcd2(out, x, y)
   while x != y do
     # out.puts x
@@ -280,5 +302,39 @@ f = m.libjit_compile
 puts f
 puts gcd2($stdout, 1000, 1005)
 p f.apply(nil, $stdout, 1000, 1005)
+=end
+
+  # TODO: implicit return values
+=begin
+def ack(m=0, n=0)
+  if m == 0 then
+    n + 1
+  elsif n == 0 then
+    ack(m - 1, 1)
+  else
+    ack(m - 1, ack(m, n - 1))
+  end
+end
+=end
+
+class Object
+def self.ack(m=0, n=0)
+  if m == 0 then
+    return n + 1
+  elsif n == 0 then
+    return Object.ack(m - 1, 1)
+  else
+    return Object.ack(m - 1, Object.ack(m, n - 1))
+  end
+end
+end
+
+require 'nodepp'
+m = Object.method(:ack)
+# pp m.body
+f = m.libjit_compile
+puts f
+puts Object.ack(0, 0)
+p f.apply(nil, 0, 0)
 
 end
