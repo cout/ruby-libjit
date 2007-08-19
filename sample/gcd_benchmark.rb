@@ -107,6 +107,8 @@ end
 
 ruby2jit_gcd2 = method(:gcd2).libjit_compile
 
+Object.define_libjit_method("gcd2jit", ruby2jit_gcd2, 2)
+
 N = 1000
 
 X = 1000
@@ -117,6 +119,7 @@ Benchmark.bm(16) do |x|
   x.report("jit tail:")      { N.times { jit_gcd_tail.apply(X, Y) } }
   x.report("ruby recur:")    { N.times { gcd(X, Y) } }
   x.report("ruby iter:")     { N.times { gcd2(X, Y) } }
-  x.report("ruby2jit iter:") { N.times { ruby2jit_gcd2.apply(X, Y) } }
+  x.report("ruby2jit iter:") { N.times { ruby2jit_gcd2.apply(nil, X, Y) } }
+  x.report("r2j dm iter:")   { N.times { gcd2jit(X, Y) } }
 end
 

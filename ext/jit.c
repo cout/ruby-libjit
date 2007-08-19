@@ -274,6 +274,7 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
    * should be sufficient for now) */
   arg_data = (char *)ALLOCA_N(char, 8 * n);
 
+  /* TODO: validate the number of args passed in */
   for(j = 0; j < n; ++j)
   {
     jit_type_t arg_type = jit_type_get_param(signature, j);
@@ -581,6 +582,22 @@ static VALUE label_s_new(VALUE klass)
 }
 
 /* ---------------------------------------------------------------------------
+ * Module
+ * ---------------------------------------------------------------------------
+ */
+
+static VALUE module_define_libjit_method(VALUE klass, VALUE name, VALUE function, VALUE arity)
+{
+  char const * c_name = STR2CSTR(name);
+  jit_function_t j_function;
+  Data_Get_Struct(function, struct _jit_function, j_function);
+  int c_arity = NUM2INT(arity); /* TODO: validate */
+  void * closure = jit_function_to_closure(j_function);
+  rb_define_method(klass, c_name, closure, c_arity);
+  return Qnil;
+}
+
+/* ---------------------------------------------------------------------------
  * Init
  * ---------------------------------------------------------------------------
  */
@@ -605,6 +622,7 @@ void Init_jit()
   rb_define_method(rb_cFunction, "insn_call", function_insn_call, -1);
   rb_define_method(rb_cFunction, "insn_call_native", function_insn_call_native, -1);
   rb_define_method(rb_cFunction, "apply", function_apply, -1);
+  rb_define_alias(rb_cFunction, "call", "apply");
   rb_define_method(rb_cFunction, "value", function_value, -1);
   rb_define_method(rb_cFunction, "optimization_level", function_optimization_level, 0);
   rb_define_method(rb_cFunction, "optimization_level=", function_set_optimization_level, 1);
@@ -660,5 +678,8 @@ void Init_jit()
   rb_define_const(rb_mCall, "NOTHROW", INT2NUM(JIT_CALL_NOTHROW));
   rb_define_const(rb_mCall, "NORETURN", INT2NUM(JIT_CALL_NORETURN));
   rb_define_const(rb_mCall, "TAIL", INT2NUM(JIT_CALL_TAIL));
+
+  /* VALUE rb_cModule = rb_define_module(); */
+  rb_define_method(rb_cModule, "define_libjit_method", module_define_libjit_method, 3);
 }
 

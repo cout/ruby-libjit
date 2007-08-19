@@ -242,13 +242,14 @@ class Method
     signature = JIT::Type.create_signature(
       self.arity >= 0 ? JIT::ABI::CDECL : JIT::ABI::VARARG,
       JIT::Type::OBJECT,
-      [ JIT::Type::OBJECT ] * self.arity.abs)
+      [ JIT::Type::OBJECT ] * (1 + self.arity.abs))
     JIT::Context.build do |context|
       function = JIT::Function.compile(context, signature) do |f|
         msig = self.signature
+        env.locals[:self] = f.get_param(0)
         msig.arg_names.each_with_index do |arg_name, idx|
           # TODO: how to deal with default values?
-          env.locals[arg_name] = f.get_param(idx)
+          env.locals[arg_name] = f.get_param(idx+1)
         end
         f.optimization_level = optimization_level
         self.body.libjit_compile(f, env)
@@ -278,6 +279,6 @@ m = method(:gcd2)
 f = m.libjit_compile
 puts f
 puts gcd2($stdout, 1000, 1005)
-p f.apply($stdout, 1000, 1005)
+p f.apply(nil, $stdout, 1000, 1005)
 
 end
