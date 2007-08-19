@@ -2,15 +2,52 @@ require 'nodewrap'
 require 'node_to_a'
 require 'methodsig'
 require 'jit'
+require 'value'
 
 class Node
   class CALL
     def libjit_compile(function, env)
-      recv = self.recv.libjit_compile(function, env)
-      id = function.value(JIT::Type::ID, self.mid)
+      mid = self.mid
       args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
+      recv = self.recv.libjit_compile(function, env)
+
+      end_label = JIT::Label.new
+
+      result = function.value(JIT::Type::OBJECT)
+
+      # TODO: This doesn't handle bignums
+      binary_fixnum_operators = {
+        :+ => proc { |lhs, rhs| lhs + (rhs & function.value(JIT::Type::INT, ~1)) },
+        :- => proc { |lhs, rhs| lhs - (rhs & function.value(JIT::Type::INT, ~1)) },
+        :< => proc { |lhs, rhs| lhs < rhs },
+        :== => proc { |lhs, rhs| lhs == rhs },
+      }
+
+      # TODO: This optimization is only valid if Fixnum#+/- has not been
+      # redefined
+      if binary_fixnum_operators.include?(mid) then
+        if args.length == 1 then
+          call_label = JIT::Label.new
+          recv_is_fixnum = recv.is_fixnum
+          function.insn_branch_if_not(recv_is_fixnum, call_label)
+          arg_is_fixnum = args[0].is_fixnum
+          function.insn_branch_if_not(arg_is_fixnum, call_label)
+          function.insn_store(
+              result,
+              binary_fixnum_operators[mid].call(recv, args[0]))
+          function.insn_branch(end_label)
+          function.insn_label(call_label)
+        end
+      end
+
+      id = function.value(JIT::Type::ID, mid)
       num_args = function.value(JIT::Type::INT, args.length)
-      function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
+      function.insn_store(
+        result,
+        function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args))
+
+      function.insn_label(end_label)
+      return result
     end
   end
 
@@ -200,7 +237,7 @@ module JIT
 end
 
 class Method
-  def libjit_compile
+  def libjit_compile(optimization_level=2)
     env = JIT::NodeCompileEnvironment.new
     signature = JIT::Type.create_signature(
       self.arity >= 0 ? JIT::ABI::CDECL : JIT::ABI::VARARG,
@@ -213,6 +250,7 @@ class Method
           # TODO: how to deal with default values?
           env.locals[arg_name] = f.get_param(idx)
         end
+        f.optimization_level = optimization_level
         self.body.libjit_compile(f, env)
       end
       return function
@@ -220,30 +258,11 @@ class Method
   end
 end
 
-=begin
-def foo(x, y)
-  return x + y
-end
-
-m = method(:foo)
-f = m.libjit_compile
-puts f
-p f.apply(1, 2)
-=end
-
-# def gcd2(x, y)
-#   while x != y do
-#     if x < y
-#       y -= x
-#     else
-#       x -= y
-#     end
-#   end
-#   return x
-# end
+if __FILE__ == $0 then
 
 def gcd2(out, x, y)
   while x != y do
+    # out.puts x
     if x < y
       y -= x
     else
@@ -257,7 +276,8 @@ require 'nodepp'
 m = method(:gcd2)
 # pp m.body
 f = m.libjit_compile
-# puts f
+puts f
 puts gcd2($stdout, 1000, 1005)
 p f.apply($stdout, 1000, 1005)
 
+end
