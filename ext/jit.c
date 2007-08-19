@@ -438,6 +438,21 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
 }
 
+static VALUE function_ruby_sourceline(VALUE self)
+{
+  jit_type_t ptr_type = jit_type_create_pointer(jit_type_int, 1);
+  jit_constant_t c;
+  jit_value_t v;
+  jit_function_t function;
+
+  Data_Get_Struct(self, struct _jit_function, function);
+  c.type = ptr_type;
+  c.un.ptr_value = &ruby_sourceline;
+  v = jit_value_create_constant(function, &c);
+
+  return Data_Wrap_Struct(rb_cValue, 0, 0, v);
+}
+
 static VALUE function_optimization_level(VALUE self)
 {
   jit_function_t function;
@@ -650,6 +665,7 @@ void Init_jit()
   rb_define_alias(rb_cFunction, "call", "apply");
   rb_define_method(rb_cFunction, "value", function_value, 1);
   rb_define_method(rb_cFunction, "const", function_const, 2);
+  rb_define_method(rb_cFunction, "ruby_sourceline", function_ruby_sourceline, 0);
   rb_define_method(rb_cFunction, "optimization_level", function_optimization_level, 0);
   rb_define_method(rb_cFunction, "optimization_level=", function_set_optimization_level, 1);
   rb_define_singleton_method(rb_cFunction, "max_optimization_level", function_max_optimization_level, 0);

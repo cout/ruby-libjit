@@ -116,7 +116,16 @@ class Node
 
   class NEWLINE
     def libjit_compile(function, env)
-      # TODO
+      # TODO: This might not be quite right.  Basically, any time that
+      # ruby_set_current_source is called, it gets the line number from
+      # the node currently being evaluated.  Of course, since we aren't
+      # evaluating nodes, that information will be stale.  There are a
+      # number of places in eval.c where ruby_set_current_source is
+      # called; we need to evaluate a dummy node for each of those
+      # cases.
+      ruby_sourceline = function.ruby_sourceline()
+      n = function.const(JIT::Type::INT, self.nd_line)
+      function.insn_store_relative(ruby_sourceline, 0, n)
       self.next.libjit_compile(function, env)
     end
   end
