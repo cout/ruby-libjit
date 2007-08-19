@@ -244,6 +244,20 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         RARRAY(args)->len,
         1);
   }
+  else if(SYM2ID(name) == rb_intern("rb_funcall2"))
+  {
+    /* TODO: what to do about exceptions? */
+    /* TODO: validate num args? */
+
+    native_func = (void *)rb_funcall2;
+    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID, jit_type_int, jit_type_void_ptr };
+    signature = jit_type_create_signature(
+        jit_abi_cdecl, /* TODO: vararg? */
+        jit_type_VALUE,
+        param_types,
+        RARRAY(args)->len,
+        1);
+  }
   else if(SYM2ID(name) == rb_intern("rb_const_get"))
   {
     native_func = (void *)rb_const_get;
@@ -268,7 +282,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   }
   else
   {
-    rb_raise(rb_eArgError, "Invalid native function");
+    rb_raise(rb_eArgError, "Invalid native function %s", j_name);
   }
 
   retval = jit_insn_call_native(

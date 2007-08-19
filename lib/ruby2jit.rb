@@ -56,10 +56,14 @@ class Node
       # TODO: need to be able to call private methods
       mid = self.mid
       args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
-      id = function.const(JIT::Type::ID, mid)
-      recv = function.const(JIT::Type::OBJECT, Object)
       num_args = function.const(JIT::Type::INT, args.length)
-      return function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
+      arg_array = function.insn_alloca(num_args)
+      args.each_with_index do |arg, idx|
+        function.insn_store_relative(arg_array, idx*4, arg)
+      end
+      id = function.const(JIT::Type::ID, mid)
+      recv = function.const(JIT::Type::OBJECT, env.self)
+      return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, arg_array)
     end
   end
 
@@ -288,7 +292,6 @@ class Method
         env.self = f.get_param(0)
         msig.arg_names.each_with_index do |arg_name, idx|
           # TODO: how to deal with default values?
-          p arg_name, idx
           env.locals[arg_name] = f.get_param(idx+1)
         end
         f.optimization_level = optimization_level
@@ -341,9 +344,9 @@ def self.ack(m=0, n=0)
   if m == 0 then
     return n + 1
   elsif n == 0 then
-    return Object.ack(m - 1, 1)
+    return ack(m - 1, 1)
   else
-    return Object.ack(m - 1, Object.ack(m, n - 1))
+    return ack(m - 1, ack(m, n - 1))
   end
 end
 end
