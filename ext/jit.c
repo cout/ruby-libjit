@@ -227,13 +227,21 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
 
     native_func = (void *)rb_funcall;
 
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID, jit_type_int };
+    jit_type_t * param_types = ALLOCA_N(jit_type_t, RARRAY(args)->len);
+    param_types[0] = jit_type_VALUE;
+    param_types[1] = jit_type_ID;
+    param_types[2] = jit_type_int;
+
+    for(j = 0; j < RARRAY(args)->len; ++j)
+    {
+      param_types[j] = jit_type_VALUE;
+    }
 
     signature = jit_type_create_signature(
-        jit_abi_vararg,
+        jit_abi_cdecl, /* TODO: vararg? */
         jit_type_VALUE,
         param_types,
-        3,
+        RARRAY(args)->len,
         1);
   }
   else
@@ -241,7 +249,6 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
     rb_raise(rb_eArgError, "Invalid native function");
   }
 
-  fflush(stdout);
   retval = jit_insn_call_native(
       function, j_name, native_func, signature, j_args, RARRAY(args)->len, j_flags);
   return Data_Wrap_Struct(rb_cValue, 0, 0, retval);
