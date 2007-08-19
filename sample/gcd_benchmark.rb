@@ -1,5 +1,6 @@
 require 'jit'
 require 'benchmark'
+require 'ruby2jit'
 
 
 # GCD, JIT-compiled
@@ -68,7 +69,7 @@ JIT::Context.build do |context|
     temp4 = f.insn_call("gcd", f, JIT::Call::TAIL, s2, x)
     # f.insn_return(temp4)
 
-    # f.optimization_level = 3
+    f.optimization_level = 3
   end
 end
 
@@ -104,16 +105,18 @@ def gcd2(x, y)
   return x
 end
 
+ruby2jit_gcd2 = method(:gcd2).libjit_compile
 
-N = 10000
+N = 1000
 
 X = 1000
 Y = 1005
 
 Benchmark.bm(12) do |x|
-  x.report("jit")         { N.times { jit_gcd.apply(X, Y) } }
-  x.report("jit tail:")   { N.times { jit_gcd_tail.apply(X, Y) } }
-  x.report("ruby recur:") { N.times { gcd(X, Y) } }
-  x.report("ruby iter:")  { N.times { gcd2(X, Y) } }
+  x.report("jit")            { N.times { jit_gcd.apply(X, Y) } }
+  x.report("jit tail:")      { N.times { jit_gcd_tail.apply(X, Y) } }
+  x.report("ruby recur:")    { N.times { gcd(X, Y) } }
+  x.report("ruby iter:")     { N.times { gcd2(X, Y) } }
+  x.report("ruby2jit iter:") { N.times { ruby2jit_gcd2.apply(X, Y) } }
 end
 
