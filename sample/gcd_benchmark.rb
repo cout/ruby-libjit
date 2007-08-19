@@ -112,7 +112,7 @@ N = 1000
 X = 1000
 Y = 1005
 
-Benchmark.bm(12) do |x|
+Benchmark.bm(16) do |x|
   x.report("jit")            { N.times { jit_gcd.apply(X, Y) } }
   x.report("jit tail:")      { N.times { jit_gcd_tail.apply(X, Y) } }
   x.report("ruby recur:")    { N.times { gcd(X, Y) } }
