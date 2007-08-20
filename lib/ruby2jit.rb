@@ -195,6 +195,49 @@ class Node
     end
   end
 
+  class FOR
+    def libjit_compile(function, env)
+      # var - an assignment node that gets executed each time through
+      # the loop
+      # body - the body of the loop
+      # iter - the sequence to iterate over
+      # 1. compile a nested function from the body of the loop
+      # 2. pass this nested function as a parameter to 
+
+      each_signature = JIT::Type.create_signature(
+        JIT::ABI::CDECL,
+        JIT::Type::OBJECT,
+        [ JIT::Type::VOID_PTR ])
+      each_f = JIT::Function.compile(env.context, each_signature) do |f|
+        f.optimization_level = env.optimization_level
+        recv = self.iter.libjit_compile(f, env)
+        id_each = f.const(JIT::Type::ID, :each)
+        zero = f.const(JIT::Type::INT, 0)
+        result = f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
+        f.insn_return(result)
+      end
+
+      # TODO: handle multiple assignment
+      var = env.locals[self.var.vid] = function.value(JIT::Type::OBJECT)
+
+      body_signature = JIT::Type::create_signature(
+        JIT::ABI::CDECL,
+        JIT::Type::OBJECT,
+        [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
+      body_f = JIT::Function.compile(env.context, body_signature) do |f|
+        value = f.get_param(0)
+        f.insn_store(var, value)
+        result = self.body.libjit_compile(f, env)
+        f.insn_return(result)
+      end
+
+      each_c = function.const(JIT::Type::VOID_PTR, each_f.to_closure)
+      body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
+      null_ptr = function.const(JIT::Type::VOID_PTR, 0);
+      function.insn_call_native(:rb_iterate, 0, each_c, null_ptr, body_c, null_ptr)
+    end
+  end
+
   class IF
     def libjit_compile(function, env)
       else_label = JIT::Label.new
@@ -277,10 +320,14 @@ module JIT
   class NodeCompileEnvironment
     attr_reader :locals
     attr_accessor :self
+    attr_accessor :context
+    attr_accessor :optimization_level
 
     def initialize
       @locals = {}
       @self = nil
+      @context = nil
+      @optimization_level = nil
     end
   end
 end
@@ -302,7 +349,12 @@ class Method
     end
 
     JIT::Context.build do |context|
+      env.context = context
+      env.optimization_level = optimization_level
+
       function = JIT::Function.compile(context, signature) do |f|
+        f.optimization_level = env.optimization_level
+
         if self.arity >= 0 then
           # all arguments required for this method
           env.self = f.get_param(0)
@@ -318,6 +370,7 @@ class Method
           while opt do
             vid = opt.head.vid
             value = opt.head.value
+            p vid, value
             optional_args[vid] = value
             opt = opt.next
           end
@@ -326,6 +379,7 @@ class Method
           argv = f.get_param(1)
           env.self = f.get_param(2)
 
+          p msig.arg_names
           msig.arg_names.each_with_index do |arg_name, idx|
             if idx < msig.arg_names.size - optional_args.size then
               # TODO: use insn_load_elem
@@ -348,7 +402,6 @@ class Method
           end
         end
 
-        f.optimization_level = optimization_level
         self.body.libjit_compile(f, env)
       end
 
@@ -359,68 +412,26 @@ end
 
 if __FILE__ == $0 then
 
-=begin
-def gcd2(out, x, y)
-  while x != y do
-    # out.puts x
-    if x < y
-      y -= x
-    else
-      x -= y
-    end
-  end
-  return x
+  require 'nodepp'
+def array_access(n=1)
+   x = Array.new(n)
+   y = Array.new(n, 0)
+
+   # for i in 0...n
+   #    x[i] = i + 1
+   # end
+
+   for k in 0..999
+      (n-1).step(0,-1) do |i|
+         y[i] = y.at(i) + x.at(i)
+      end
+   end
 end
 
-require 'nodepp'
-m = method(:gcd2)
-# pp m.body
-f = m.libjit_compile
-puts f
-puts gcd2($stdout, 1000, 1005)
-p f.apply(nil, $stdout, 1000, 1005)
-=end
-
-  # TODO: implicit return values
-=begin
-def ack(m=0, n=0)
-  if m == 0 then
-    n + 1
-  elsif n == 0 then
-    ack(m - 1, 1)
-  else
-    ack(m - 1, ack(m, n - 1))
-  end
-end
-=end
-
-=begin
-def ack(m=0, n=0)
-  if m == 0 then
-    return n + 1
-  elsif n == 0 then
-    return ack(m - 1, 1)
-  else
-    return ack(m - 1, ack(m, n - 1))
-  end
-end
-
-require 'nodepp'
-m = method(:ack)
+m = method(:array_access)
 # pp m.body
 f = m.libjit_compile
 # puts f
-puts ack(0, 0)
-p f.apply(self, 0, 0)
-=end
-
-def foo(m=42)
-  puts m
-end
-
-m = method(:foo)
-f = m.libjit_compile
-# puts f
-p f.apply(self)
+p f.apply(self, 1)
 
 end

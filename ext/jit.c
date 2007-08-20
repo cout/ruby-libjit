@@ -286,6 +286,17 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         RARRAY(args)->len,
         1);
   }
+  else if(SYM2ID(name) == rb_intern("rb_iterate"))
+  {
+    native_func = (void *)rb_iterate;
+    jit_type_t param_types[] = { jit_type_void_ptr, jit_type_void_ptr, jit_type_void_ptr, jit_type_void_ptr };
+    signature = jit_type_create_signature(
+        jit_abi_cdecl,
+        jit_type_VALUE,
+        param_types,
+        4,
+        1);
+  }
   else if(SYM2ID(name) == rb_intern("rb_const_get"))
   {
     native_func = (void *)rb_const_get;
@@ -465,6 +476,15 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
       break;
     }
 
+    case JIT_TYPE_PTR:
+    {
+      jit_constant_t c;
+      c.type = j_type;
+      c.un.ptr_value = (void *)NUM2ULONG(constant);
+      v = jit_value_create_constant(function, &c);
+      break;
+    }
+
     case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
     {
       jit_constant_t c;
@@ -540,6 +560,14 @@ static VALUE function_to_s(VALUE self)
   jit_dump_function(fp, function, 0);
   fclose(fp);
   return rb_str_new2(buf);
+}
+
+static VALUE function_to_closure(VALUE self)
+{
+  jit_function_t function;
+  Data_Get_Struct(self, struct _jit_function, function);
+  void * closure = jit_function_to_closure(function);
+  return ULONG2NUM((unsigned long)closure);
 }
 
 /* ---------------------------------------------------------------------------
@@ -730,6 +758,7 @@ void Init_jit()
   rb_define_method(rb_cFunction, "optimization_level=", function_set_optimization_level, 1);
   rb_define_singleton_method(rb_cFunction, "max_optimization_level", function_max_optimization_level, 0);
   rb_define_method(rb_cFunction, "to_s", function_to_s, 0);
+  rb_define_method(rb_cFunction, "to_closure", function_to_closure, 0);
 
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
