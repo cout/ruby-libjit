@@ -67,6 +67,19 @@ class Node
     end
   end
 
+  class ATTRASGN
+    def libjit_compile(function, env)
+      mid = self.mid
+      args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
+      recv = self.recv.libjit_compile(function, env)
+      id = function.const(JIT::Type::ID, mid)
+      num_args = function.const(JIT::Type::INT, args.length)
+      result = function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
+      function.insn_return(result)
+      return result
+    end
+  end
+
   class LASGN
     def libjit_compile(function, env)
       value = self.value.libjit_compile(function, env)
@@ -314,6 +327,24 @@ class Node
       return self.body.libjit_compile(function, env)
     end
   end
+
+  class DOT2
+    def libjit_compile(function, env)
+      range_begin = self.beg.libjit_compile(function, env)
+      range_end = self.end.libjit_compile(function, env)
+      exclude_end = function.const(JIT::Type::INT, 0)
+      return function.insn_call_native(:rb_range_new, 0, range_begin, range_end, exclude_end)
+    end
+  end
+
+  class DOT3
+    def libjit_compile(function, env)
+      range_begin = self.beg.libjit_compile(function, env)
+      range_end = self.end.libjit_compile(function, env)
+      exclude_end = function.const(JIT::Type::INT, 1)
+      return function.insn_call_native(:rb_range_new, 0, range_begin, range_end, exclude_end)
+    end
+  end
 end
 
 module JIT
@@ -370,7 +401,6 @@ class Method
           while opt do
             vid = opt.head.vid
             value = opt.head.value
-            p vid, value
             optional_args[vid] = value
             opt = opt.next
           end
@@ -379,7 +409,6 @@ class Method
           argv = f.get_param(1)
           env.self = f.get_param(2)
 
-          p msig.arg_names
           msig.arg_names.each_with_index do |arg_name, idx|
             if idx < msig.arg_names.size - optional_args.size then
               # TODO: use insn_load_elem
@@ -417,9 +446,9 @@ def array_access(n=1)
    x = Array.new(n)
    y = Array.new(n, 0)
 
-   # for i in 0...n
-   #    x[i] = i + 1
-   # end
+   for i in 0...n
+     x[i] = i + 1
+   end
 
    for k in 0..999
       (n-1).step(0,-1) do |i|
