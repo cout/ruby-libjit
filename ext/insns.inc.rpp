@@ -159,6 +159,8 @@ insns = [
   [ 'store_relative'   , _, V, N, V ] ,
   [ 'load_relative'    , V, V, N, T ] ,
   [ 'alloca'           , V, V       ] ,
+  [ 'load_elem'        , V, V, V, T ] ,
+  [ 'store_elem'       , _, V, V, V ] ,
 ]
 
 insns.each do |name, retval_type, *arg_types|
