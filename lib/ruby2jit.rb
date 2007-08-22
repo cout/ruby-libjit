@@ -4,11 +4,43 @@ require 'methodsig'
 require 'jit'
 require 'value'
 
+def debug_print_object(f, obj)
+  f.insn_call_native(
+      :rb_funcall,
+      0,
+      f.const(JIT::Type::OBJECT, $stdout),
+      f.const(JIT::Type::ID, :puts),
+      f.const(JIT::Type::INT, 1),
+      obj)
+end
+
 class Node
+  class FALSENODE
+    def libjit_compile(function, env)
+      return function.const(JIT::Type::OBJECT, false)
+    end
+  end
+
+  class TRUENODE
+    def libjit_compile(function, env)
+      return function.const(JIT::Type::OBJECT, true)
+    end
+  end
+
+  class NILNODE
+    def libjit_compile(function, env)
+      return function.const(JIT::Type::OBJECT, nil)
+    end
+  end
+
   class CALL
     def libjit_compile(function, env)
       mid = self.mid
-      args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
+      if self.args then
+        args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
+      else
+        args = []
+      end
       recv = self.recv.libjit_compile(function, env)
 
       end_label = JIT::Label.new
@@ -42,9 +74,8 @@ class Node
 
       id = function.const(JIT::Type::ID, mid)
       num_args = function.const(JIT::Type::INT, args.length)
-      function.insn_store(
-        result,
-        function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args))
+      call_result = function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
+      function.insn_store(result, call_result)
 
       function.insn_label(end_label)
       return result
@@ -53,17 +84,22 @@ class Node
 
   class FCALL
     def libjit_compile(function, env)
-      # TODO: might be better to use insn_push than alloca/store
       mid = self.mid
-      args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
+      if self.args then
+        args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
+      else
+        args = []
+      end
       num_args = function.const(JIT::Type::INT, args.length)
-      arg_array = function.insn_alloca(num_args)
+      array_type = JIT::Type.create_struct([ JIT::Type::OBJECT ] * args.length)
+      array = function.value(array_type)
+      array_ptr = function.insn_address_of(array)
       args.each_with_index do |arg, idx|
-        function.insn_store_relative(arg_array, idx*4, arg)
+        function.insn_store_elem(array_ptr, function.const(JIT::Type::INT, idx), arg)
       end
       id = function.const(JIT::Type::ID, mid)
-      recv = function.const(JIT::Type::OBJECT, env.self)
-      return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, arg_array)
+      recv = function.const(JIT::Type::OBJECT, env.frame.self)
+      return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, array_ptr)
     end
   end
 
@@ -83,23 +119,28 @@ class Node
   class LASGN
     def libjit_compile(function, env)
       value = self.value.libjit_compile(function, env)
-      if not env.locals.include?(self.vid) then
-        env.locals[self.vid] = value
-      else
-        function.insn_store(env.locals[self.vid], value)
-      end
+      return env.scope.local_set(self.vid, value)
     end
   end
 
   class LVAR
     def libjit_compile(function, env)
-      return env.locals[self.vid]
+      return env.scope.local_get(self.vid)
     end
   end
 
+=begin
+  class DVAR
+    def libjit_compile(function, env)
+      # TODO: should this really be the same as LVAR?
+      return env.locals[self.vid]
+    end
+  end
+=end
+
   class CONST
     def libjit_compile(function, env)
-      klass = function.insn_call_native(:rb_class_of, 0, env.self)
+      klass = function.insn_call_native(:rb_class_of, 0, env.frame.self)
       vid = function.const(JIT::Type::ID, self.vid)
       return function.insn_call_native(:rb_const_get, 0, klass, vid)
     end
@@ -115,7 +156,8 @@ class Node
 
   class LIT
     def libjit_compile(function, env)
-      return function.const(JIT::Type::OBJECT, self.lit)
+      lit = function.const(JIT::Type::OBJECT, self.lit)
+      return lit
     end
   end
 
@@ -128,6 +170,7 @@ class Node
         retval = function.const(JIT::Type::Object, nil)
         function.insn_return(retval)
       end
+      return self
     end
   end
 
@@ -157,9 +200,10 @@ class Node
     def libjit_compile(function, env)
       n = self
       while n do
-        n.head.libjit_compile(function, env)
+        last = n.head.libjit_compile(function, env)
         n = n.next
       end
+      return last
     end
   end
 
@@ -217,6 +261,75 @@ class Node
       # 1. compile a nested function from the body of the loop
       # 2. pass this nested function as a parameter to 
 
+      env_type = JIT::Type.create_struct([ JIT::Type::VOID_PTR, JIT::Type::VOID_PTR ])
+      env_ptr = function.insn_address_of(function.value(env_type))
+      function.insn_store_relative(env_ptr, 0, env.frame.address)
+      function.insn_store_relative(env_ptr, 4, env.scope.address)
+
+      each_signature = JIT::Type.create_signature(
+        JIT::ABI::CDECL,
+        JIT::Type::OBJECT,
+        [ JIT::Type::VOID_PTR ])
+      each_f = JIT::Function.compile(function.context, each_signature) do |f|
+        f.optimization_level = env.optimization_level
+
+        # TODO: not sure if this is needed here?  not sure if it even helps?
+        ruby_sourceline = f.ruby_sourceline()
+        n = f.const(JIT::Type::INT, self.nd_line)
+        f.insn_store_relative(ruby_sourceline, 0, n)
+
+        outer_env_ptr = f.get_param(0)
+        inner_frame_ptr = f.insn_load_relative(outer_env_ptr, 0, JIT::Type::VOID_PTR)
+        inner_scope_ptr = f.insn_load_relative(outer_env_ptr, 4, JIT::Type::VOID_PTR)
+        inner_frame = JIT::NodeCompileFrame.from_address(f, inner_frame_ptr)
+        inner_scope = JIT::NodeCompileScope.from_address(f, inner_scope_ptr, env.scope.local_names) # TODO
+        inner_env = JIT::NodeCompileEnvironment.new(f, env.optimization_level, inner_frame, inner_scope)
+        recv = self.iter.libjit_compile(f, inner_env)
+        id_each = f.const(JIT::Type::ID, :each)
+        zero = f.const(JIT::Type::INT, 0)
+        result = f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
+        f.insn_return(result)
+      end
+
+      body_signature = JIT::Type::create_signature(
+        JIT::ABI::CDECL,
+        JIT::Type::OBJECT,
+        [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
+      body_f = JIT::Function.compile(function.context, body_signature) do |f|
+        f.optimization_level = env.optimization_level
+        value = f.get_param(0)
+        outer_env_ptr = f.get_param(1)
+        inner_frame_ptr = f.insn_load_relative(outer_env_ptr, 0, JIT::Type::VOID_PTR)
+        inner_scope_ptr = f.insn_load_relative(outer_env_ptr, 4, JIT::Type::VOID_PTR)
+        inner_frame = JIT::NodeCompileFrame.from_address(f, inner_frame_ptr)
+        inner_scope = JIT::NodeCompileScope.from_address(f, inner_scope_ptr, env.scope.local_names) # TODO
+        inner_env = JIT::NodeCompileEnvironment.new(f, env.optimization_level, inner_frame, inner_scope)
+        inner_env.scope.local_set(self.var.vid, value)
+        if self.body then
+          result = self.body.libjit_compile(f, inner_env)
+        else
+          result = f.const(JIT::Type::OBJECT, nil)
+        end
+        f.insn_return(result)
+      end
+
+      each_c = function.const(JIT::Type::VOID_PTR, each_f.to_closure)
+      body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
+      result = function.insn_call_native(:rb_iterate, 0, each_c, env_ptr, body_c, env_ptr)
+      return result
+    end
+  end
+
+=begin
+  class ITER
+    def libjit_compile(function, env)
+      # var - an assignment node that gets executed each time through
+      # the loop
+      # body - the body of the loop
+      # iter - the sequence to iterate over
+      # 1. compile a nested function from the body of the loop
+      # 2. pass this nested function as a parameter to 
+
       each_signature = JIT::Type.create_signature(
         JIT::ABI::CDECL,
         JIT::Type::OBJECT,
@@ -231,7 +344,9 @@ class Node
       end
 
       # TODO: handle multiple assignment
-      var = env.locals[self.var.vid] = function.value(JIT::Type::OBJECT)
+      var = function.value(JIT::Type::OBJECT)
+      env = env.dup
+      env.locals[self.var.vid] = var
 
       body_signature = JIT::Type::create_signature(
         JIT::ABI::CDECL,
@@ -250,6 +365,7 @@ class Node
       function.insn_call_native(:rb_iterate, 0, each_c, null_ptr, body_c, null_ptr)
     end
   end
+=end
 
   class IF
     def libjit_compile(function, env)
@@ -328,6 +444,21 @@ class Node
     end
   end
 
+  class ARRAY
+    def libjit_compile(function, env)
+      a = self.to_a
+      n = function.const(JIT::Type::INT, a.length)
+      debug_print_object(function, function.const(JIT::Type::OBJECT, "HERE"))
+      ary = function.insn_call_native(:rb_ary_new2, 0, n)
+      a.each_with_index do |elem, idx|
+        i = function.const(JIT::Type::INT, idx)
+        value = elem.libjit_compile(function, env)
+        function.insn_call_native(:rb_ary_store, 0, ary, i, value)
+      end
+      return ary
+    end
+  end
+
   class DOT2
     def libjit_compile(function, env)
       range_begin = self.beg.libjit_compile(function, env)
@@ -348,25 +479,158 @@ class Node
 end
 
 module JIT
+  class NodeCompileFrame
+    FrameType = JIT::Type.create_struct([
+        JIT::Type::OBJECT, # self
+    ])
+
+    def self.from_address(function, address)
+      frame = function.insn_load_relative(address, 0, FrameType)
+      return self.new(function, frame)
+    end
+
+    def initialize(function, frame=nil)
+      @function = function
+      @frame = frame ? frame : function.value(FrameType)
+      @frame_ptr = function.insn_address_of(@frame)
+      @self_offset = function.const(JIT::Type::INT, 0)
+    end
+
+    def self
+      return @function.insn_load_elem(@frame_ptr, @self_offset, JIT::Type::OBJECT)
+      # return @self
+    end
+
+    def self=(value)
+      @function.insn_store_elem(@frame_ptr, @self_offset, value)
+      # @self = value
+    end
+
+    def address
+      return @frame_ptr
+    end
+  end
+
+  class NodeLocalVariable
+    def initialize(function, name)
+      @function = function
+      @name = name
+      @addressable = false
+    end
+
+    def set(value)
+      if @addressable then
+        @function.insn_store_relative(@array, @offset, value)
+      else
+        if @value then
+          @function.insn_store(@value, value)
+        else
+          @value = value
+        end
+      end
+    end
+
+    def get
+      if @addressable then
+        return @function.insn_load_relative(@array, @offset, JIT::Type::OBJECT)
+      else
+        return @value
+      end
+    end
+
+    def set_addressable(array, offset)
+      @addressable = true
+      @array = array
+      @offset = offset
+      # TODO: assert that @value is not addressable
+      if defined?(@value) then
+        @function.insn_store_relative(@array, @offset, @value)
+      end
+    end
+  end
+
+  class NodeCompileScope
+    attr_reader :scope_type
+    attr_reader :scope
+    attr_reader :local_names
+
+    # TODO: This function isn't right
+    def self.from_address(function, address, local_names)
+      scope_type = JIT::Type.create_struct(
+          [ JIT::Type::OBJECT ] * local_names.size
+      )
+      # scope = function.insn_load_relative(function, address, 0, scope_type)
+      locals = {}
+      local_names.each_with_index do |name, idx|
+        locals[name] = NodeLocalVariable.new(
+            function,
+            name)
+        locals[name].set_addressable(address, scope_type.get_offset(idx))
+      end
+      return self.new(function, local_names, locals)
+    end
+
+    def initialize(function, local_names, locals=nil)
+      @function = function
+      @scope_type = JIT::Type.create_struct(
+          [ JIT::Type::OBJECT ] * local_names.size
+      )
+      @scope = function.value(@scope_type)
+
+      @local_names = local_names
+
+      if locals then
+        @locals = locals
+      else
+        @locals = {}
+        local_names.each do |name|
+          @locals[name] = NodeLocalVariable.new(
+              function,
+              name)
+        end
+      end
+    end
+
+    def local_set(vid, value)
+      @locals[vid].set(value)
+    end
+
+    def local_get(vid)
+      return @locals[vid].get()
+    end
+
+    def address
+      @scope_ptr = @function.insn_address_of(@scope)
+      @local_names.each_with_index do |name, idx|
+        offset = @scope_type.get_offset(idx)
+        @locals[name].set_addressable(@scope_ptr, offset)
+      end
+      return @scope_ptr
+    end
+  end
+
   class NodeCompileEnvironment
-    attr_reader :locals
-    attr_accessor :self
-    attr_accessor :context
+    attr_reader :frame
+    attr_reader :scope
     attr_accessor :optimization_level
 
-    def initialize
-      @locals = {}
-      @self = nil
-      @context = nil
-      @optimization_level = nil
+    def initialize(function, optimization_level, frame, scope)
+      @function = function
+      @optimization_level = optimization_level
+      @frame = frame
+      @scope = scope
+      @scope_stack = []
     end
+
+    # def push_scope
+    #   @scope_stack.push(@scope)
+    #   @scope = scope.dup
+    # end
   end
 end
 
 class Method
   def libjit_compile(optimization_level=2)
-    env = JIT::NodeCompileEnvironment.new
-
     msig = self.signature
     if self.arity >= 0 then
       # all arguments required for this method
@@ -380,18 +644,26 @@ class Method
     end
 
     JIT::Context.build do |context|
-      env.context = context
-      env.optimization_level = optimization_level
-
       function = JIT::Function.compile(context, signature) do |f|
-        f.optimization_level = env.optimization_level
+        f.optimization_level = optimization_level
+
+        frame = JIT::NodeCompileFrame.new(
+            f)
+        scope = JIT::NodeCompileScope.new(
+            f,
+            self.body.tbl || [])
+        env = JIT::NodeCompileEnvironment.new(
+            f,
+            optimization_level,
+            frame,
+            scope)
 
         if self.arity >= 0 then
           # all arguments required for this method
-          env.self = f.get_param(0)
+          env.frame.self = f.get_param(0)
           msig.arg_names.each_with_index do |arg_name, idx|
             # TODO: how to deal with default values?
-            env.locals[arg_name] = f.get_param(idx+1)
+            env.scope.local_set(arg_name,  f.get_param(idx+1))
           end
         else
           # some arguments are optional for this method
@@ -407,14 +679,15 @@ class Method
 
           argc = f.get_param(0)
           argv = f.get_param(1)
-          env.self = f.get_param(2)
+          env.frame.self = f.get_param(2)
 
           msig.arg_names.each_with_index do |arg_name, idx|
             if idx < msig.arg_names.size - optional_args.size then
-              # TODO: use insn_load_elem
-              env.locals[arg_name] = f.insn_load_relative(argv, idx*4, JIT::Type::OBJECT)
+              # TODO: use insn_load_elem?
+              env.local_set(arg_name, f.insn_load_relative(argv, idx*4, JIT::Type::OBJECT))
             else
-              var = env.locals[arg_name] = f.value(JIT::Type::OBJECT)
+              var = f.value(JIT::Type::OBJECT)
+              env.scope.local_set(arg_name, var)
               var_idx = f.const(JIT::Type::OBJECT, idx)
               have_this_arg = var_idx <= argc
               have_this_arg_label = JIT::Label.new
@@ -431,7 +704,12 @@ class Method
           end
         end
 
-        self.body.libjit_compile(f, env)
+        result = self.body.libjit_compile(f, env)
+        if not Node::RETURN === result then
+          f.insn_return(result)
+        end
+        # puts f
+        puts "About to compile..."
       end
 
       return function
@@ -442,25 +720,42 @@ end
 if __FILE__ == $0 then
 
   require 'nodepp'
+
+=begin
+def gcd2(x, y)
+  while x != y do
+    puts x, y
+    if x < y
+      y -= x
+    else
+      x -= y
+    end
+  end
+  return x
+end
+=end
+
 def array_access(n=1)
    x = Array.new(n)
    y = Array.new(n, 0)
 
    for i in 0...n
-     x[i] = i + 1
+      # x[i] = i + 1
+     puts "i=#{i}"
    end
 
-   for k in 0..999
-      (n-1).step(0,-1) do |i|
-         y[i] = y.at(i) + x.at(i)
-      end
-   end
+   # for k in 0..999
+   #    (n-1).step(0,-1) do |i|
+   #       y[i] = y.at(i) + x.at(i)
+   #    end
+   # end
 end
 
 m = method(:array_access)
 # pp m.body
 f = m.libjit_compile
+puts "Compiled"
 # puts f
-p f.apply(self, 1)
+p f.apply(self, 10)
 
 end
