@@ -261,10 +261,7 @@ class Node
       # 1. compile a nested function from the body of the loop
       # 2. pass this nested function as a parameter to 
 
-      env_type = JIT::Type.create_struct([ JIT::Type::VOID_PTR, JIT::Type::VOID_PTR ])
-      env_ptr = function.insn_address_of(function.value(env_type))
-      function.insn_store_relative(env_ptr, 0, env.frame.address)
-      function.insn_store_relative(env_ptr, 4, env.scope.address)
+      env_ptr = env.address()
 
       each_signature = JIT::Type.create_signature(
         JIT::ABI::CDECL,
@@ -279,11 +276,8 @@ class Node
         f.insn_store_relative(ruby_sourceline, 0, n)
 
         outer_env_ptr = f.get_param(0)
-        inner_frame_ptr = f.insn_load_relative(outer_env_ptr, 0, JIT::Type::VOID_PTR)
-        inner_scope_ptr = f.insn_load_relative(outer_env_ptr, 4, JIT::Type::VOID_PTR)
-        inner_frame = JIT::NodeCompileFrame.from_address(f, inner_frame_ptr)
-        inner_scope = JIT::NodeCompileScope.from_address(f, inner_scope_ptr, env.scope.local_names) # TODO
-        inner_env = JIT::NodeCompileEnvironment.new(f, env.optimization_level, inner_frame, inner_scope)
+        inner_env = JIT::NodeCompileEnvironment.from_address(
+            f, outer_env_ptr, env.scope.local_names, env.optimization_level)
         recv = self.iter.libjit_compile(f, inner_env)
         id_each = f.const(JIT::Type::ID, :each)
         zero = f.const(JIT::Type::INT, 0)
@@ -299,11 +293,8 @@ class Node
         f.optimization_level = env.optimization_level
         value = f.get_param(0)
         outer_env_ptr = f.get_param(1)
-        inner_frame_ptr = f.insn_load_relative(outer_env_ptr, 0, JIT::Type::VOID_PTR)
-        inner_scope_ptr = f.insn_load_relative(outer_env_ptr, 4, JIT::Type::VOID_PTR)
-        inner_frame = JIT::NodeCompileFrame.from_address(f, inner_frame_ptr)
-        inner_scope = JIT::NodeCompileScope.from_address(f, inner_scope_ptr, env.scope.local_names) # TODO
-        inner_env = JIT::NodeCompileEnvironment.new(f, env.optimization_level, inner_frame, inner_scope)
+        inner_env = JIT::NodeCompileEnvironment.from_address(
+            f, outer_env_ptr, env.scope.local_names, env.optimization_level)
         inner_env.scope.local_set(self.var.vid, value)
         if self.body then
           result = self.body.libjit_compile(f, inner_env)
@@ -626,6 +617,22 @@ module JIT
     #   @scope_stack.push(@scope)
     #   @scope = scope.dup
     # end
+
+    def address
+      env_type = JIT::Type.create_struct([ JIT::Type::VOID_PTR, JIT::Type::VOID_PTR ])
+      env_ptr = @function.insn_address_of(@function.value(env_type))
+      @function.insn_store_relative(env_ptr, 0, self.frame.address)
+      @function.insn_store_relative(env_ptr, 4, self.scope.address)
+      return env_ptr
+    end
+
+    def self.from_address(function, address, local_names, optimization_level)
+      frame_ptr = function.insn_load_relative(address, 0, JIT::Type::VOID_PTR)
+      scope_ptr = function.insn_load_relative(address, 4, JIT::Type::VOID_PTR)
+      frame = JIT::NodeCompileFrame.from_address(function, frame_ptr)
+      scope = JIT::NodeCompileScope.from_address(function, scope_ptr, local_names) # TODO
+      env = JIT::NodeCompileEnvironment.new(function, optimization_level, frame, scope)
+    end
   end
 end
 
