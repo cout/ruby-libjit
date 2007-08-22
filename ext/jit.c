@@ -127,7 +127,6 @@ static VALUE create_function(int argc, VALUE * argv, VALUE klass)
 
   if(RTEST(parent))
   {
-    printf("Creating nested function\n");
     Data_Get_Struct(parent, struct _jit_function, parent_function);
     function = jit_function_create_nested(jit_context, jit_signature, parent_function);
   }
