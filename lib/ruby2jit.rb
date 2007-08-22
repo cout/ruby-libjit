@@ -111,7 +111,6 @@ class Node
       id = function.const(JIT::Type::ID, mid)
       num_args = function.const(JIT::Type::INT, args.length)
       result = function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
-      function.insn_return(result)
       return result
     end
   end
@@ -302,8 +301,10 @@ class Node
           result = f.const(JIT::Type::OBJECT, nil)
         end
         f.insn_return(result)
+        # puts f
       end
 
+      # TODO: will this leak memory if the function is redefined later?
       each_c = function.const(JIT::Type::VOID_PTR, each_f.to_closure)
       body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
       result = function.insn_call_native(:rb_iterate, 0, each_c, env_ptr, body_c, env_ptr)
@@ -321,39 +322,54 @@ class Node
       # 1. compile a nested function from the body of the loop
       # 2. pass this nested function as a parameter to 
 
+      env_ptr = env.address()
+
       each_signature = JIT::Type.create_signature(
         JIT::ABI::CDECL,
         JIT::Type::OBJECT,
         [ JIT::Type::VOID_PTR ])
-      each_f = JIT::Function.compile(env.context, each_signature) do |f|
+      each_f = JIT::Function.compile(function.context, each_signature) do |f|
         f.optimization_level = env.optimization_level
-        recv = self.iter.libjit_compile(f, env)
+
+        # TODO: not sure if this is needed here?  not sure if it even helps?
+        ruby_sourceline = f.ruby_sourceline()
+        n = f.const(JIT::Type::INT, self.nd_line)
+        f.insn_store_relative(ruby_sourceline, 0, n)
+
+        outer_env_ptr = f.get_param(0)
+        inner_env = JIT::NodeCompileEnvironment.from_address(
+            f, outer_env_ptr, env.scope.local_names, env.optimization_level)
+        recv = self.iter.libjit_compile(f, inner_env)
         id_each = f.const(JIT::Type::ID, :each)
         zero = f.const(JIT::Type::INT, 0)
         result = f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
         f.insn_return(result)
       end
 
-      # TODO: handle multiple assignment
-      var = function.value(JIT::Type::OBJECT)
-      env = env.dup
-      env.locals[self.var.vid] = var
-
       body_signature = JIT::Type::create_signature(
         JIT::ABI::CDECL,
         JIT::Type::OBJECT,
         [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
-      body_f = JIT::Function.compile(env.context, body_signature) do |f|
+      body_f = JIT::Function.compile(function.context, body_signature) do |f|
+        f.optimization_level = env.optimization_level
         value = f.get_param(0)
-        f.insn_store(var, value)
-        result = self.body.libjit_compile(f, env)
+        outer_env_ptr = f.get_param(1)
+        inner_env = JIT::NodeCompileEnvironment.from_address(
+            f, outer_env_ptr, env.scope.local_names, env.optimization_level)
+        inner_env.scope.local_set(self.var.vid, value)
+        if self.body then
+          result = self.body.libjit_compile(f, inner_env)
+        else
+          result = f.const(JIT::Type::OBJECT, nil)
+        end
         f.insn_return(result)
       end
 
+      # TODO: will this leak memory if the function is redefined later?
       each_c = function.const(JIT::Type::VOID_PTR, each_f.to_closure)
       body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
-      null_ptr = function.const(JIT::Type::VOID_PTR, 0);
-      function.insn_call_native(:rb_iterate, 0, each_c, null_ptr, body_c, null_ptr)
+      result = function.insn_call_native(:rb_iterate, 0, each_c, env_ptr, body_c, env_ptr)
+      return result
     end
   end
 =end
@@ -411,19 +427,15 @@ class Node
 
   class DSTR
     def libjit_compile(function, env)
-      # TODO: Use rb_str_new, if String.new is not redefined
-      rb_cString = function.const(JIT::Type::OBJECT, String)
-      id_new = function.const(JIT::Type::ID, :new)
       id_to_s = function.const(JIT::Type::ID, :to_s)
-      id_lshift = function.const(JIT::Type::ID, :<<)
       zero = function.const(JIT::Type::INT, 0)
-      one = function.const(JIT::Type::INT, 1)
-      str = function.insn_call_native(:rb_funcall, 0, rb_cString, id_new, zero)
+      start = function.const(JIT::Type::OBJECT, self.lit)
+      str = function.insn_call_native(:rb_str_dup, 0, start)
       a = self.next.to_a
       a.each do |elem|
         v = elem.libjit_compile(function, env)
         s = function.insn_call_native(:rb_funcall, 0, v, id_to_s, zero)
-        function.insn_call_native(:rb_funcall, 0, str, id_lshift, one, s)
+        function.insn_call_native(:rb_str_concat, 0, str, s)
       end
       return str
     end
@@ -744,16 +756,18 @@ end
 
 def array_access(n=1)
    x = Array.new(n)
-   y = Array.new(n, 0)
+   # y = Array.new(n, 0)
 
    for i in 0...n
-      # x[i] = i + 1
+     # x[i] = i + 1
      puts "i=#{i}"
    end
+   # p x
 
    # for k in 0..999
+   #   puts "k=#{k}"
    #    (n-1).step(0,-1) do |i|
-   #       y[i] = y.at(i) + x.at(i)
+   #       # y[i] = y.at(i) + x.at(i)
    #    end
    # end
 end
