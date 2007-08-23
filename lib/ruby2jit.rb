@@ -14,6 +14,14 @@ def debug_print_object(f, obj)
       obj)
 end
 
+def debug_print_ptr(f, ptr)
+  v = f.insn_call_native(
+      :rb_uint2inum,
+      0,
+      ptr)
+  debug_print_object(f, v)
+end
+
 class Node
   class FALSENODE
     def libjit_compile(function, env)
@@ -262,16 +270,15 @@ class Node
 
       env_ptr = env.address()
 
-      each_signature = JIT::Type.create_signature(
+      iter_signature = JIT::Type.create_signature(
         JIT::ABI::CDECL,
         JIT::Type::OBJECT,
         [ JIT::Type::VOID_PTR ])
-      each_f = JIT::Function.compile(function.context, each_signature) do |f|
+      iter_f = JIT::Function.compile(function.context, iter_signature) do |f|
         f.optimization_level = env.optimization_level
 
-        # TODO: not sure if this is needed here?  not sure if it even helps?
         ruby_sourceline = f.ruby_sourceline()
-        n = f.const(JIT::Type::INT, self.nd_line)
+        n = f.const(JIT::Type::INT, self.iter.nd_line)
         f.insn_store_relative(ruby_sourceline, 0, n)
 
         outer_env_ptr = f.get_param(0)
@@ -290,12 +297,21 @@ class Node
         [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
       body_f = JIT::Function.compile(function.context, body_signature) do |f|
         f.optimization_level = env.optimization_level
+
         value = f.get_param(0)
         outer_env_ptr = f.get_param(1)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
+        case self.var
+        when false
+        when LASGN then inner_env.scope.local_set(self.var.vid, value)
+        else raise "Can't handle #{self.var.class}"
+        end
         inner_env.scope.local_set(self.var.vid, value)
         if self.body then
+          ruby_sourceline = f.ruby_sourceline()
+          n = f.const(JIT::Type::INT, self.body.nd_line)
+          f.insn_store_relative(ruby_sourceline, 0, n)
           result = self.body.libjit_compile(f, inner_env)
         else
           result = f.const(JIT::Type::OBJECT, nil)
@@ -305,16 +321,16 @@ class Node
       end
 
       # TODO: will this leak memory if the function is redefined later?
-      each_c = function.const(JIT::Type::VOID_PTR, each_f.to_closure)
+      iter_c = function.const(JIT::Type::VOID_PTR, iter_f.to_closure)
       body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
-      result = function.insn_call_native(:rb_iterate, 0, each_c, env_ptr, body_c, env_ptr)
+      result = function.insn_call_native(:rb_iterate, 0, iter_c, env_ptr, body_c, env_ptr)
       return result
     end
   end
 
-=begin
   class ITER
     def libjit_compile(function, env)
+      pp self
       # var - an assignment node that gets executed each time through
       # the loop
       # body - the body of the loop
@@ -324,25 +340,21 @@ class Node
 
       env_ptr = env.address()
 
-      each_signature = JIT::Type.create_signature(
+      iter_signature = JIT::Type.create_signature(
         JIT::ABI::CDECL,
         JIT::Type::OBJECT,
         [ JIT::Type::VOID_PTR ])
-      each_f = JIT::Function.compile(function.context, each_signature) do |f|
+      iter_f = JIT::Function.compile(function.context, iter_signature) do |f|
         f.optimization_level = env.optimization_level
 
-        # TODO: not sure if this is needed here?  not sure if it even helps?
         ruby_sourceline = f.ruby_sourceline()
-        n = f.const(JIT::Type::INT, self.nd_line)
+        n = f.const(JIT::Type::INT, self.iter.nd_line)
         f.insn_store_relative(ruby_sourceline, 0, n)
 
         outer_env_ptr = f.get_param(0)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
-        recv = self.iter.libjit_compile(f, inner_env)
-        id_each = f.const(JIT::Type::ID, :each)
-        zero = f.const(JIT::Type::INT, 0)
-        result = f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
+        result = self.iter.libjit_compile(f, inner_env)
         f.insn_return(result)
       end
 
@@ -352,12 +364,20 @@ class Node
         [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
       body_f = JIT::Function.compile(function.context, body_signature) do |f|
         f.optimization_level = env.optimization_level
+
         value = f.get_param(0)
         outer_env_ptr = f.get_param(1)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
-        inner_env.scope.local_set(self.var.vid, value)
+        case self.var
+        when false
+        when LASGN then inner_env.scope.local_set(self.var.vid, value)
+        else raise "Can't handle #{self.var.class}"
+        end
         if self.body then
+          ruby_sourceline = f.ruby_sourceline()
+          n = f.const(JIT::Type::INT, self.body.nd_line)
+          f.insn_store_relative(ruby_sourceline, 0, n)
           result = self.body.libjit_compile(f, inner_env)
         else
           result = f.const(JIT::Type::OBJECT, nil)
@@ -366,13 +386,12 @@ class Node
       end
 
       # TODO: will this leak memory if the function is redefined later?
-      each_c = function.const(JIT::Type::VOID_PTR, each_f.to_closure)
+      iter_c = function.const(JIT::Type::VOID_PTR, iter_f.to_closure)
       body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
-      result = function.insn_call_native(:rb_iterate, 0, each_c, env_ptr, body_c, env_ptr)
+      result = function.insn_call_native(:rb_iterate, 0, iter_c, env_ptr, body_c, env_ptr)
       return result
     end
   end
-=end
 
   class IF
     def libjit_compile(function, env)
@@ -399,7 +418,7 @@ class Node
       is_false = self.body.to_libjit_inverted_bool(function, env)
       # 0 => 0 (Qfalse); 1 => 2 (Qtrue)
       one = function.const(JIT::Type::INT, 1)
-      return function.insn_shl(is_false, one)
+      return function.insn_ushl(is_false, one)
     end
   end
 
@@ -451,7 +470,6 @@ class Node
     def libjit_compile(function, env)
       a = self.to_a
       n = function.const(JIT::Type::INT, a.length)
-      debug_print_object(function, function.const(JIT::Type::OBJECT, "HERE"))
       ary = function.insn_call_native(:rb_ary_new2, 0, n)
       a.each_with_index do |elem, idx|
         i = function.const(JIT::Type::INT, idx)
@@ -570,15 +588,14 @@ module JIT
             name)
         locals[name].set_addressable(address, scope_type.get_offset(idx))
       end
-      return self.new(function, local_names, locals)
+      return self.new(function, local_names, locals, address)
     end
 
-    def initialize(function, local_names, locals=nil)
+    def initialize(function, local_names, locals=nil, scope_ptr=nil)
       @function = function
       @scope_type = JIT::Type.create_struct(
           [ JIT::Type::OBJECT ] * local_names.size
       )
-      @scope = function.value(@scope_type)
 
       @local_names = local_names
 
@@ -592,6 +609,10 @@ module JIT
               name)
         end
       end
+
+      if scope_ptr then
+        @scope_ptr = scope_ptr
+      end
     end
 
     def local_set(vid, value)
@@ -603,10 +624,13 @@ module JIT
     end
 
     def address
-      @scope_ptr = @function.insn_address_of(@scope)
-      @local_names.each_with_index do |name, idx|
-        offset = @scope_type.get_offset(idx)
-        @locals[name].set_addressable(@scope_ptr, offset)
+      if not defined?(@scope_ptr) then
+        @scope = @function.value(@scope_type)
+        @scope_ptr = @function.insn_address_of(@scope)
+        @local_names.each_with_index do |name, idx|
+          offset = @scope_type.get_offset(idx)
+          @locals[name].set_addressable(@scope_ptr, offset)
+        end
       end
       return @scope_ptr
     end
@@ -756,24 +780,30 @@ end
 
 def array_access(n=1)
    x = Array.new(n)
-   # y = Array.new(n, 0)
+   y = Array.new(n, 0)
 
    for i in 0...n
-     # x[i] = i + 1
-     puts "i=#{i}"
+     x[i] = i + 1
    end
-   # p x
 
-   # for k in 0..999
-   #   puts "k=#{k}"
-   #    (n-1).step(0,-1) do |i|
-   #       # y[i] = y.at(i) + x.at(i)
-   #    end
-   # end
+   for k in 0..999
+     # puts "k=#{k}"
+        # p x#, y
+      (n-1).step(0,-1) do |i|
+        y[i] = y.at(i) + x.at(i)
+      end
+   end
+   p x, y
+  # x = 0
+  # for i in 1..3 do
+  #   for j in 1..3 do
+  #     puts i
+  #   end
+  # end
 end
 
 m = method(:array_access)
-# pp m.body
+pp m.body
 f = m.libjit_compile
 puts "Compiled"
 # puts f
