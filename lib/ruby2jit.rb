@@ -199,7 +199,7 @@ class Node
       ruby_sourceline = function.ruby_sourceline()
       n = function.const(JIT::Type::INT, self.nd_line)
       function.insn_store_relative(ruby_sourceline, 0, n)
-      self.next.libjit_compile(function, env)
+      return self.next.libjit_compile(function, env)
     end
   end
 
@@ -330,7 +330,6 @@ class Node
 
   class ITER
     def libjit_compile(function, env)
-      pp self
       # var - an assignment node that gets executed each time through
       # the loop
       # body - the body of the loop
@@ -398,8 +397,9 @@ class Node
       else_label = JIT::Label.new
       cond_is_false = self.cond.to_libjit_inverted_bool(function, env)
       function.insn_branch_if(cond_is_false, else_label)
+      result = function.value(JIT::Type::OBJECT)
       if self.body then
-        self.body.libjit_compile(function, env)
+        function.insn_store(result, self.body.libjit_compile(function, env))
       end
       if self.else then
         end_label = JIT::Label.new
@@ -407,9 +407,10 @@ class Node
       end
       function.insn_label(else_label)
       if self.else then
-        self.else.libjit_compile(function, env)
+        function.insn_store(result, self.else.libjit_compile(function, env))
         function.insn_label(end_label)
       end
+      return result
     end
   end
 
@@ -477,6 +478,29 @@ class Node
         function.insn_call_native(:rb_ary_store, 0, ary, i, value)
       end
       return ary
+    end
+  end
+
+  class ZARRAY
+    def libjit_compile(function, env)
+      zero = function.const(JIT::Type::INT, 0)
+      return function.insn_call_native(:rb_ary_new2, 0, zero)
+    end
+  end
+
+  class HASH
+    def libjit_compile(function, env)
+      hash = function.insn_call_native(:rb_hash_new, 0)
+      a = self.head
+      while a do
+        k = a.head.libjit_compile(function, env)
+        a = a.next
+        v = a.head.libjit_compile(function, env)
+        function.insn_call_native(:rb_hash_aset, 0, hash, k, v)
+        a = a.next
+      end
+      return hash
+      pp self
     end
   end
 
@@ -617,6 +641,7 @@ module JIT
 
     def local_set(vid, value)
       @locals[vid].set(value)
+      return value
     end
 
     def local_get(vid)
@@ -747,12 +772,13 @@ class Method
           end
         end
 
+        # pp self.body
         result = self.body.libjit_compile(f, env)
         if not Node::RETURN === result then
           f.insn_return(result)
         end
         # puts f
-        puts "About to compile..."
+        # puts "About to compile..."
       end
 
       return function
@@ -778,35 +804,15 @@ def gcd2(x, y)
 end
 =end
 
-def array_access(n=1)
-   x = Array.new(n)
-   y = Array.new(n, 0)
-
-   for i in 0...n
-     x[i] = i + 1
-   end
-
-   for k in 0..999
-     # puts "k=#{k}"
-        # p x#, y
-      (n-1).step(0,-1) do |i|
-        y[i] = y.at(i) + x.at(i)
-      end
-   end
-   p x, y
-  # x = 0
-  # for i in 1..3 do
-  #   for j in 1..3 do
-  #     puts i
-  #   end
-  # end
+def foo
+  return { 1=>2, 3=>4 }
 end
 
-m = method(:array_access)
+m = method(:foo)
 pp m.body
 f = m.libjit_compile
 puts "Compiled"
 # puts f
-p f.apply(self, 10)
+p f.apply(self)
 
 end
