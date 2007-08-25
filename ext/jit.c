@@ -19,6 +19,13 @@ static jit_type_t jit_type_ID;
 
 static jit_type_t ruby_vararg_signature;
 
+/* TODO: There's no good way once we create a closure to know when we're
+ * done with it.  This is to keep the function around as long as the
+ * closure is -- which is necessary to prevent the app from crashing --
+ * but the result is that the function is permanently around, since it
+ * is never removed from this array */
+static VALUE libjit_closure_functions;
+
 /* TODO: this might not be right for 64-bit systems */
 typedef jit_uint jit_VALUE;
 #define jit_underlying_type_VALUE jit_type_uint
@@ -702,6 +709,7 @@ static VALUE function_to_closure(VALUE self)
   jit_function_t function;
   Data_Get_Struct(self, struct _jit_function, function);
   void * closure = jit_function_to_closure(function);
+  rb_ary_push(libjit_closure_functions, self);
   return ULONG2NUM((unsigned long)closure);
 }
 
@@ -710,6 +718,13 @@ static VALUE function_get_context(VALUE self)
   jit_function_t function;
   Data_Get_Struct(self, struct _jit_function, function);
   return (VALUE)jit_function_get_meta(function, CONTEXT);
+}
+
+static VALUE function_is_compiled(VALUE self)
+{
+  jit_function_t function;
+  Data_Get_Struct(self, struct _jit_function, function);
+  return jit_function_is_compiled(function) ? Qtrue : Qfalse;
 }
 
 /* ---------------------------------------------------------------------------
@@ -914,6 +929,7 @@ static VALUE module_define_libjit_method(VALUE klass, VALUE name, VALUE function
   Data_Get_Struct(function, struct _jit_function, j_function);
   int c_arity = NUM2INT(arity); /* TODO: validate */
   void * closure = jit_function_to_closure(j_function);
+  rb_ary_push(libjit_closure_functions, function);
   rb_define_method(klass, c_name, closure, c_arity);
   return Qnil;
 }
@@ -953,6 +969,7 @@ void Init_jit()
   rb_define_method(rb_cFunction, "to_s", function_to_s, 0);
   rb_define_method(rb_cFunction, "to_closure", function_to_closure, 0);
   rb_define_method(rb_cFunction, "context", function_get_context, 0);
+  rb_define_method(rb_cFunction, "compiled?", function_is_compiled, 0);
 
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
@@ -1021,5 +1038,8 @@ void Init_jit()
 
   /* VALUE rb_cModule = rb_define_module(); */
   rb_define_method(rb_cModule, "define_libjit_method", module_define_libjit_method, 3);
+
+  libjit_closure_functions = rb_ary_new();
+  rb_gc_register_address(&libjit_closure_functions);
 }
 

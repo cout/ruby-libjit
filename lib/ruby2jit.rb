@@ -22,6 +22,11 @@ def debug_print_ptr(f, ptr)
   debug_print_object(f, v)
 end
 
+def debug_print_msg(f, msg)
+  v = f.const(JIT::Type::OBJECT, msg)
+  debug_print_object(f, v)
+end
+
 class Node
   class FALSENODE
     def libjit_compile(function, env)
@@ -41,52 +46,57 @@ class Node
     end
   end
 
+  def libjit_compile_call(function, env, recv, mid, args)
+    end_label = JIT::Label.new
+
+    if args then
+      args = args.to_a.map { |arg| arg.libjit_compile(function, env) }
+    else
+      args = []
+    end
+
+    result = function.value(JIT::Type::OBJECT)
+
+    # TODO: This doesn't handle bignums
+    binary_fixnum_operators = {
+      :+ => proc { |lhs, rhs| lhs + (rhs & function.const(JIT::Type::INT, ~1)) },
+      :- => proc { |lhs, rhs| lhs - (rhs & function.const(JIT::Type::INT, ~1)) },
+      :< => proc { |lhs, rhs| lhs < rhs },
+      :== => proc { |lhs, rhs| lhs == rhs },
+    }
+
+    # TODO: This optimization is only valid if Fixnum#+/- has not been
+    # redefined
+    if binary_fixnum_operators.include?(mid) then
+      if args.length == 1 then
+        call_label = JIT::Label.new
+        recv_is_fixnum = recv.is_fixnum
+        function.insn_branch_if_not(recv_is_fixnum, call_label)
+        arg_is_fixnum = args[0].is_fixnum
+        function.insn_branch_if_not(arg_is_fixnum, call_label)
+        function.insn_store(
+            result,
+            binary_fixnum_operators[mid].call(recv, args[0]))
+        function.insn_branch(end_label)
+        function.insn_label(call_label)
+      end
+    end
+
+    id = function.const(JIT::Type::ID, mid)
+    num_args = function.const(JIT::Type::INT, args.length)
+    call_result = function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
+    function.insn_store(result, call_result)
+
+    function.insn_label(end_label)
+    return result
+  end
+
   class CALL
     def libjit_compile(function, env)
-      mid = self.mid
-      if self.args then
-        args = self.args.to_a.map { |arg| arg.libjit_compile(function, env) }
-      else
-        args = []
-      end
       recv = self.recv.libjit_compile(function, env)
-
-      end_label = JIT::Label.new
-
-      result = function.value(JIT::Type::OBJECT)
-
-      # TODO: This doesn't handle bignums
-      binary_fixnum_operators = {
-        :+ => proc { |lhs, rhs| lhs + (rhs & function.const(JIT::Type::INT, ~1)) },
-        :- => proc { |lhs, rhs| lhs - (rhs & function.const(JIT::Type::INT, ~1)) },
-        :< => proc { |lhs, rhs| lhs < rhs },
-        :== => proc { |lhs, rhs| lhs == rhs },
-      }
-
-      # TODO: This optimization is only valid if Fixnum#+/- has not been
-      # redefined
-      if binary_fixnum_operators.include?(mid) then
-        if args.length == 1 then
-          call_label = JIT::Label.new
-          recv_is_fixnum = recv.is_fixnum
-          function.insn_branch_if_not(recv_is_fixnum, call_label)
-          arg_is_fixnum = args[0].is_fixnum
-          function.insn_branch_if_not(arg_is_fixnum, call_label)
-          function.insn_store(
-              result,
-              binary_fixnum_operators[mid].call(recv, args[0]))
-          function.insn_branch(end_label)
-          function.insn_label(call_label)
-        end
-      end
-
-      id = function.const(JIT::Type::ID, mid)
-      num_args = function.const(JIT::Type::INT, args.length)
-      call_result = function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
-      function.insn_store(result, call_result)
-
-      function.insn_label(end_label)
-      return result
+      mid = self.mid
+      args = self.args
+      return libjit_compile_call(function, env, recv, mid, args)
     end
   end
 
@@ -133,6 +143,42 @@ class Node
   class LVAR
     def libjit_compile(function, env)
       return env.scope.local_get(self.vid)
+    end
+  end
+
+  class MASGN
+    def libjit_compile(function, env)
+      n = function.const(JIT::Type::INT, a.length)
+      ary = function.insn_call_native(:rb_ary_new2, 0, n)
+      mlhs = self.head.to_a
+      mrhs = self.next.to_a
+      mlhs.each_with_index do |lhs, idx|
+        rhs = mhrs[idx]
+        case lhs
+        when LASGN
+          env.scope.local_set(lhs.vid, rhs)
+        else
+          raise "Can't handle #{lhs.class}"
+        end
+        i = function.const(JIT::Type::INT, idx)
+        function.insn_call_native(:rb_ary_store, 0, ary, i, rhs)
+      end
+      return ary
+    end
+  end
+
+  class OP_ASGN1
+    def libjit_compile(function, env)
+      # recv[args.body] = recv[args.body].mid(args.head)
+      recv = self.recv.libjit_compile(function, env)
+      index = [ self.args.body ]
+      one = function.const(JIT::Type::INT, 1)
+      lhs = libjit_compile_call(function, env, recv, :[], index)
+      rhs = [ self.args.head ]
+      mid = self.mid
+      result = libjit_compile_call(function, env, lhs, mid, rhs)
+      function.insn_store(lhs, result)
+      return result
     end
   end
 
@@ -368,11 +414,18 @@ class Node
         outer_env_ptr = f.get_param(1)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
+
         case self.var
         when false
-        when LASGN then inner_env.scope.local_set(self.var.vid, value)
+        when LASGN then
+          inner_env.scope.local_set(self.var.vid, value)
+        when MASGN then
+          self.var.head.to_a.each do |asgn|
+            raise "TODO"
+          end
         else raise "Can't handle #{self.var.class}"
         end
+
         if self.body then
           ruby_sourceline = f.ruby_sourceline()
           n = f.const(JIT::Type::INT, self.body.nd_line)
@@ -790,29 +843,71 @@ if __FILE__ == $0 then
 
   require 'nodepp'
 
-=begin
-def gcd2(x, y)
-  while x != y do
-    puts x, y
-    if x < y
-      y -= x
-    else
-      x -= y
-    end
-  end
-  return x
-end
-=end
+# def word_frequency
+#    data = "While the word Machiavellian suggests cunning, duplicity,
+# or bad faith, it would be unfair to equate the word with the man. Old
+# Nicolwas actually a devout and principled man, who had profound
+# insight into human nature and the politics of his time. Far more
+# worthy of the pejorative implication is Cesare Borgia, the incestuous
+# and multi-homicidal pope who was the inspiration for The Prince. You
+# too may ponder the question that preoccupied Machiavelli: can a
+# government stay in power if it practices the morality that it preaches
+# to its people?"
+#    freq = Hash.new(0)
+#    for word in data.downcase.tr_s('^A-Za-z',' ').split(' ')
+#       freq[word] += 1
+#    end
+#    freq.delete("")
+#    lines = Array.new
+#    freq.each{|w,c| lines << sprintf("%7d\t%s\n", c, w) }
+# end
 
-def foo
-  return { 1=>2, 3=>4 }
+def nested_loop(n = 10)
+   x = 0
+   n.times do
+      n.times do
+         n.times do
+            n.times do
+               n.times do
+                  n.times do
+                  x += 1
+                  end
+               end
+            end
+         end
+      end
+   end
 end
 
-m = method(:foo)
-pp m.body
+def fib(n=20)
+   if n < 2 then
+    1
+   else
+    fib(n-2) + fib(n-1)
+   end
+end
+
+# m = method(:word_frequency)
+# pp m.body
+# f = m.libjit_compile
+# puts "Compiled"
+# # puts f
+# p f.apply(self)
+
+m = method(:nested_loop)
+f = m.libjit_compile
+puts "Compiled"
+p f.apply(self)
+Object.define_libjit_method("nl", f, -1)
+nl()
+
+m = method(:fib)
+# pp m.body
 f = m.libjit_compile
 puts "Compiled"
 # puts f
 p f.apply(self)
+Object.define_libjit_method("foo", f, -1)
+foo()
 
 end
