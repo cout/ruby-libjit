@@ -167,6 +167,19 @@ class Node
     end
   end
 
+  class DASGN
+    def libjit_compile(function, env)
+      value = self.value.libjit_compile(function, env)
+      return env.scope.dyn_set(self.vid, value)
+    end
+  end
+
+  class DVAR
+    def libjit_compile(function, env)
+      env.scope.dyn_get(self.vid)
+    end
+  end
+
   class MASGN
     def libjit_compile(function, env)
       n = function.const(JIT::Type::INT, a.length)
@@ -204,15 +217,6 @@ class Node
       return result
     end
   end
-
-=begin
-  class DVAR
-    def libjit_compile(function, env)
-      # TODO: should this really be the same as LVAR?
-      return env.locals[self.vid]
-    end
-  end
-=end
 
   class CONST
     def libjit_compile(function, env)
@@ -372,12 +376,14 @@ class Node
         outer_env_ptr = f.get_param(1)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
+
         case self.var
         when false
         when LASGN then inner_env.scope.local_set(self.var.vid, value)
+        when DASGN_CURR then inner_env.scope.dyn_set(self.var.vid, value)
         else raise "Can't handle #{self.var.class}"
         end
-        inner_env.scope.local_set(self.var.vid, value)
+
         if self.body then
           ruby_sourceline = f.ruby_sourceline()
           n = f.const(JIT::Type::INT, self.body.nd_line)
@@ -427,6 +433,8 @@ class Node
         result = self.iter.libjit_compile(f, inner_env)
         f.insn_return(result)
       end
+
+      # TODO: I think ITER is supposed to get its own scope?
 
       body_signature = JIT::Type::create_signature(
         JIT::ABI::CDECL,
@@ -520,7 +528,8 @@ class Node
 
   class STR
     def libjit_compile(function, env)
-      return function.const(JIT::Type::OBJECT, self.lit)
+      str = function.const(JIT::Type::OBJECT, self.lit)
+      return function.insn_call_native(:rb_str_dup, 0, str)
     end
   end
 
@@ -650,7 +659,7 @@ module JIT
 
     def set(value)
       if @addressable then
-        @function.insn_store_relative(@array, @offset, value)
+        @function.insn_store_relative(@ptr, @offset, value)
       else
         if @value then
           @function.insn_store(@value, value)
@@ -662,19 +671,19 @@ module JIT
 
     def get
       if @addressable then
-        return @function.insn_load_relative(@array, @offset, JIT::Type::OBJECT)
+        return @function.insn_load_relative(@ptr, @offset, JIT::Type::OBJECT)
       else
         return @value
       end
     end
 
-    def set_addressable(array, offset)
+    def set_addressable(ptr, offset)
       @addressable = true
-      @array = array
+      @ptr = ptr
       @offset = offset
       # TODO: assert that @value is not addressable
       if defined?(@value) then
-        @function.insn_store_relative(@array, @offset, @value)
+        @function.insn_store_relative(@ptr, @offset, @value)
       end
     end
   end
@@ -700,22 +709,27 @@ module JIT
       return self.new(function, local_names, locals, address)
     end
 
+    DYNAVARS_NAME = :':dynavars:'
+
     def initialize(function, local_names, locals=nil, scope_ptr=nil)
       @function = function
-      @scope_type = JIT::Type.create_struct(
-          [ JIT::Type::OBJECT ] * local_names.size
-      )
 
-      @local_names = local_names
+      if locals then
+        @local_names = local_names
+      else
+        @local_names = [ DYNAVARS_NAME ] + local_names
+      end
+
+      @scope_type = JIT::Type.create_struct(
+          [ JIT::Type::OBJECT ] * @local_names.size
+      )
 
       if locals then
         @locals = locals
       else
         @locals = {}
-        local_names.each do |name|
-          @locals[name] = NodeLocalVariable.new(
-              function,
-              name)
+        @local_names.each do |name|
+          create_local(name)
         end
       end
 
@@ -733,13 +747,37 @@ module JIT
       return @locals[vid].get()
     end
 
+    # TODO: a hash is easy to use, but maybe not very fast
+    def dyn_set(vid, value)
+      create_dynavars()
+      name = @function.const(JIT::Type::OBJECT, vid)
+      @function.insn_call_native(:rb_hash_aset, 0, @dynavars, name, value)
+    end
+
+    def dyn_get(vid)
+      create_dynavars()
+      name = @function.const(JIT::Type::OBJECT, vid)
+      return @function.insn_call_native(:rb_hash_aref, 0, @dynavars, name)
+    end
+
+    def create_dynavars
+      if not defined?(@dynavars) then
+        @dynavars = @function.insn_call_native(:rb_hash_new, 0)
+        local_set(DYNAVARS_NAME, @dynavars)
+      end
+    end
+
+    def create_local(name)
+      @locals[name] = NodeLocalVariable.new(@function, name)
+    end
+
     def address
       if not defined?(@scope_ptr) then
         @scope = @function.value(@scope_type)
         @scope_ptr = @function.insn_address_of(@scope)
         @local_names.each_with_index do |name, idx|
           offset = @scope_type.get_offset(idx)
-          @locals[name].set_addressable(@scope_ptr, offset)
+          @locals[name].set_addressable(@scope_ptr, offset) if @locals[name]
         end
       end
       return @scope_ptr
@@ -875,42 +913,26 @@ if __FILE__ == $0 then
 
   require 'nodepp'
 
-# lists
-SIZE = 10000
-def lists
-   li1 = (1..SIZE).to_a
-   li2 = li1.dup
-   li3 = Array.new
-
-   while (not li2.empty?)
-      li3.push(li2.shift)
+def hash_access_II(n=20)
+   hash1 = {}
+   for i in 0 .. 9999
+      hash1["foo_" << i.to_s] = i
    end
 
-   while (not li3.empty?)
-      li2.push(li3.pop)
+   hash2 = Hash.new(0)
+   n.times do |i|
+      for k in hash1.keys
+        # p k
+         hash2[k] += hash1[k]
+      end
    end
+end   
 
-   li1.reverse!
-
-   if li1[0] != SIZE then
-      p "not SIZE"
-     return(0)
-   end
-
-   if li1 != li2 then
-     return(0)
-   end
-
-   return(li1.length)
-end
-
-m = method(:lists)
-# pp m.body
+m = method(:hash_access_II)
+pp m.body
 f = m.libjit_compile
 puts "Compiled"
-# puts f
 p f.apply(self)
-Object.define_libjit_method("foo", f, -1)
-foo()
+# hash_access_II()
 
 end
