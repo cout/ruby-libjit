@@ -4,6 +4,18 @@ require 'methodsig'
 require 'jit'
 require 'value'
 
+module JIT
+  class Value
+    def is_returned=(boolean)
+      @is_returned = boolean
+    end
+
+    def is_returned
+      return defined?(@is_returned) && @is_returned
+    end
+  end
+end
+
 def debug_print_object(f, obj)
   f.insn_call_native(
       :rb_funcall,
@@ -28,6 +40,12 @@ def debug_print_msg(f, msg)
 end
 
 class Node
+  def set_sourceline(function)
+    ruby_sourceline = function.ruby_sourceline()
+    n = function.const(JIT::Type::INT, self.nd_line)
+    function.insn_store_relative(ruby_sourceline, 0, n)
+  end
+
   class FALSENODE
     def libjit_compile(function, env)
       return function.const(JIT::Type::OBJECT, false)
@@ -84,6 +102,7 @@ class Node
 
     id = function.const(JIT::Type::ID, mid)
     num_args = function.const(JIT::Type::INT, args.length)
+    set_sourceline(function)
     call_result = function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
     function.insn_store(result, call_result)
 
@@ -117,6 +136,7 @@ class Node
       end
       id = function.const(JIT::Type::ID, mid)
       recv = function.const(JIT::Type::OBJECT, env.frame.self)
+      set_sourceline(function)
       return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, array_ptr)
     end
   end
@@ -128,6 +148,7 @@ class Node
       recv = self.recv.libjit_compile(function, env)
       id = function.const(JIT::Type::ID, mid)
       num_args = function.const(JIT::Type::INT, args.length)
+      set_sourceline(function)
       result = function.insn_call_native(:rb_funcall, 0, recv, id, num_args, *args)
       return result
     end
@@ -149,6 +170,7 @@ class Node
   class MASGN
     def libjit_compile(function, env)
       n = function.const(JIT::Type::INT, a.length)
+      set_sourceline(function)
       ary = function.insn_call_native(:rb_ary_new2, 0, n)
       mlhs = self.head.to_a
       mrhs = self.next.to_a
@@ -161,6 +183,7 @@ class Node
           raise "Can't handle #{lhs.class}"
         end
         i = function.const(JIT::Type::INT, idx)
+        set_sourceline(function)
         function.insn_call_native(:rb_ary_store, 0, ary, i, rhs)
       end
       return ary
@@ -193,6 +216,7 @@ class Node
 
   class CONST
     def libjit_compile(function, env)
+      set_sourceline(function)
       klass = function.insn_call_native(:rb_class_of, 0, env.frame.self)
       vid = function.const(JIT::Type::ID, self.vid)
       return function.insn_call_native(:rb_const_get, 0, klass, vid)
@@ -203,6 +227,7 @@ class Node
     def libjit_compile(function, env)
       rb_cObject = function.const(JIT::Type::OBJECT, Object)
       vid = function.const(JIT::Type::ID, self.vid)
+      set_sourceline(function)
       return function.insn_call_native(:rb_const_get, 0, rb_cObject, vid)
     end
   end
@@ -223,7 +248,8 @@ class Node
         retval = function.const(JIT::Type::Object, nil)
         function.insn_return(retval)
       end
-      return self
+      retval.is_returned = true
+      return retval
     end
   end
 
@@ -242,9 +268,6 @@ class Node
       # instruction offset to source line and only modifying
       # ruby_sourceline when an exception is raised (or other event that
       # reads ruby_sourceline).
-      ruby_sourceline = function.ruby_sourceline()
-      n = function.const(JIT::Type::INT, self.nd_line)
-      function.insn_store_relative(ruby_sourceline, 0, n)
       return self.next.libjit_compile(function, env)
     end
   end
@@ -333,6 +356,7 @@ class Node
         recv = self.iter.libjit_compile(f, inner_env)
         id_each = f.const(JIT::Type::ID, :each)
         zero = f.const(JIT::Type::INT, 0)
+        set_sourceline(function)
         result = f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
         f.insn_return(result)
       end
@@ -369,6 +393,7 @@ class Node
       # TODO: will this leak memory if the function is redefined later?
       iter_c = function.const(JIT::Type::VOID_PTR, iter_f.to_closure)
       body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
+      set_sourceline(function)
       result = function.insn_call_native(:rb_iterate, 0, iter_c, env_ptr, body_c, env_ptr)
       return result
     end
@@ -440,6 +465,7 @@ class Node
       # TODO: will this leak memory if the function is redefined later?
       iter_c = function.const(JIT::Type::VOID_PTR, iter_f.to_closure)
       body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
+      set_sourceline(function)
       result = function.insn_call_native(:rb_iterate, 0, iter_c, env_ptr, body_c, env_ptr)
       return result
     end
@@ -503,6 +529,7 @@ class Node
       id_to_s = function.const(JIT::Type::ID, :to_s)
       zero = function.const(JIT::Type::INT, 0)
       start = function.const(JIT::Type::OBJECT, self.lit)
+      set_sourceline(function)
       str = function.insn_call_native(:rb_str_dup, 0, start)
       a = self.next.to_a
       a.each do |elem|
@@ -524,6 +551,7 @@ class Node
     def libjit_compile(function, env)
       a = self.to_a
       n = function.const(JIT::Type::INT, a.length)
+      set_sourceline(function)
       ary = function.insn_call_native(:rb_ary_new2, 0, n)
       a.each_with_index do |elem, idx|
         i = function.const(JIT::Type::INT, idx)
@@ -537,12 +565,14 @@ class Node
   class ZARRAY
     def libjit_compile(function, env)
       zero = function.const(JIT::Type::INT, 0)
+      set_sourceline(function)
       return function.insn_call_native(:rb_ary_new2, 0, zero)
     end
   end
 
   class HASH
     def libjit_compile(function, env)
+      set_sourceline(function)
       hash = function.insn_call_native(:rb_hash_new, 0)
       a = self.head
       while a do
@@ -562,6 +592,7 @@ class Node
       range_begin = self.beg.libjit_compile(function, env)
       range_end = self.end.libjit_compile(function, env)
       exclude_end = function.const(JIT::Type::INT, 0)
+      set_sourceline(function)
       return function.insn_call_native(:rb_range_new, 0, range_begin, range_end, exclude_end)
     end
   end
@@ -571,6 +602,7 @@ class Node
       range_begin = self.beg.libjit_compile(function, env)
       range_end = self.end.libjit_compile(function, env)
       exclude_end = function.const(JIT::Type::INT, 1)
+      set_sourceline(function)
       return function.insn_call_native(:rb_range_new, 0, range_begin, range_end, exclude_end)
     end
   end
@@ -827,7 +859,7 @@ class Method
 
         # pp self.body
         result = self.body.libjit_compile(f, env)
-        if not Node::RETURN === result then
+        if not result.is_returned then
           f.insn_return(result)
         end
         # puts f
@@ -843,65 +875,36 @@ if __FILE__ == $0 then
 
   require 'nodepp'
 
-# def word_frequency
-#    data = "While the word Machiavellian suggests cunning, duplicity,
-# or bad faith, it would be unfair to equate the word with the man. Old
-# Nicolwas actually a devout and principled man, who had profound
-# insight into human nature and the politics of his time. Far more
-# worthy of the pejorative implication is Cesare Borgia, the incestuous
-# and multi-homicidal pope who was the inspiration for The Prince. You
-# too may ponder the question that preoccupied Machiavelli: can a
-# government stay in power if it practices the morality that it preaches
-# to its people?"
-#    freq = Hash.new(0)
-#    for word in data.downcase.tr_s('^A-Za-z',' ').split(' ')
-#       freq[word] += 1
-#    end
-#    freq.delete("")
-#    lines = Array.new
-#    freq.each{|w,c| lines << sprintf("%7d\t%s\n", c, w) }
-# end
+# lists
+SIZE = 10000
+def lists
+   li1 = (1..SIZE).to_a
+   li2 = li1.dup
+   li3 = Array.new
 
-def nested_loop(n = 10)
-   x = 0
-   n.times do
-      n.times do
-         n.times do
-            n.times do
-               n.times do
-                  n.times do
-                  x += 1
-                  end
-               end
-            end
-         end
-      end
+   while (not li2.empty?)
+      li3.push(li2.shift)
    end
+
+   while (not li3.empty?)
+      li2.push(li3.pop)
+   end
+
+   li1.reverse!
+
+   if li1[0] != SIZE then
+      p "not SIZE"
+     return(0)
+   end
+
+   if li1 != li2 then
+     return(0)
+   end
+
+   return(li1.length)
 end
 
-def fib(n=20)
-   if n < 2 then
-    1
-   else
-    fib(n-2) + fib(n-1)
-   end
-end
-
-# m = method(:word_frequency)
-# pp m.body
-# f = m.libjit_compile
-# puts "Compiled"
-# # puts f
-# p f.apply(self)
-
-m = method(:nested_loop)
-f = m.libjit_compile
-puts "Compiled"
-p f.apply(self)
-Object.define_libjit_method("nl", f, -1)
-nl()
-
-m = method(:fib)
+m = method(:lists)
 # pp m.body
 f = m.libjit_compile
 puts "Compiled"
