@@ -14,29 +14,45 @@ module JIT
       return defined?(@is_returned) && @is_returned
     end
   end
-end
 
-def debug_print_object(f, obj)
-  f.insn_call_native(
-      :rb_funcall,
-      0,
-      f.const(JIT::Type::OBJECT, $stdout),
-      f.const(JIT::Type::ID, :puts),
-      f.const(JIT::Type::INT, 1),
-      obj)
-end
+  class Function
+    def debug_print_object(obj)
+      insn_call_native(
+          :rb_funcall,
+          0,
+          const(JIT::Type::OBJECT, $stdout),
+          const(JIT::Type::ID, :puts),
+          const(JIT::Type::INT, 1),
+          obj)
+    end
 
-def debug_print_ptr(f, ptr)
-  v = f.insn_call_native(
-      :rb_uint2inum,
-      0,
-      ptr)
-  debug_print_object(f, v)
-end
+    def debug_inspect_object(obj)
+      insp = insn_call_native(
+          :rb_funcall,
+          0,
+          obj,
+          const(JIT::Type::ID, :inspect),
+          const(JIT::Type::INT, 0))
+      debug_print_object(insp)
+    end
 
-def debug_print_msg(f, msg)
-  v = f.const(JIT::Type::OBJECT, msg)
-  debug_print_object(f, v)
+    def debug_print_uint(uint)
+      v = insn_call_native(
+          :rb_uint2inum,
+          0,
+          uint)
+      debug_print_object(v)
+    end
+
+    def debug_print_ptr(ptr)
+      debug_print_uint(ptr)
+    end
+
+    def debug_print_msg(msg)
+      v = const(JIT::Type::OBJECT, msg)
+      debug_print_object(v)
+    end
+  end
 end
 
 class Node
@@ -167,7 +183,16 @@ class Node
     end
   end
 
+  # TODO: DASGN means not current frame (according to ko1), but I think
+  # this implementation modifies current frame?
   class DASGN
+    def libjit_compile(function, env)
+      value = self.value.libjit_compile(function, env)
+      return env.scope.dyn_set(self.vid, value)
+    end
+  end
+
+  class DASGN_CURR
     def libjit_compile(function, env)
       value = self.value.libjit_compile(function, env)
       return env.scope.dyn_set(self.vid, value)
@@ -332,6 +357,70 @@ class Node
     end
   end
 
+  def libjit_iterate(function, env, var, body, &block)
+    # var - an assignment node that gets executed each time through
+    # the loop
+    # body - the body of the loop
+    # iter - the sequence to iterate over
+    # 1. compile a nested function from the body of the loop
+    # 2. pass this nested function as a parameter to 
+
+    env_ptr = env.address()
+
+    iter_signature = JIT::Type.create_signature(
+      JIT::ABI::CDECL,
+      JIT::Type::OBJECT,
+      [ JIT::Type::VOID_PTR ])
+    iter_f = JIT::Function.compile(function.context, iter_signature) do |f|
+      f.optimization_level = env.optimization_level
+
+      result = yield(f)
+      f.insn_return(result)
+    end
+
+    body_signature = JIT::Type::create_signature(
+      JIT::ABI::CDECL,
+      JIT::Type::OBJECT,
+      [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
+    body_f = JIT::Function.compile(function.context, body_signature) do |f|
+      f.optimization_level = env.optimization_level
+
+      value = f.get_param(0)
+      outer_env_ptr = f.get_param(1)
+      inner_env = JIT::NodeCompileEnvironment.from_address(
+          f, outer_env_ptr, env.scope.local_names, env.optimization_level)
+
+      r = inner_env.loop {
+        case var
+        when false
+        when LASGN then inner_env.scope.local_set(var.vid, value)
+        when DASGN_CURR then inner_env.scope.dyn_set(var.vid, value)
+        else raise "Can't handle #{self.var.class}"
+        end
+
+        if body then
+          ruby_sourceline = f.ruby_sourceline()
+          n = f.const(JIT::Type::INT, body.nd_line)
+          f.insn_store_relative(ruby_sourceline, 0, n)
+          result = body.libjit_compile(f, inner_env)
+        else
+          result = f.const(JIT::Type::OBJECT, nil)
+        end
+        f.insn_return(result)
+      }
+
+      f.insn_return(r)
+      # puts f
+    end
+
+    # TODO: will this leak memory if the function is redefined later?
+    iter_c = function.const(JIT::Type::VOID_PTR, iter_f.to_closure)
+    body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
+    set_sourceline(function)
+    result = function.insn_call_native(:rb_iterate, 0, iter_c, env_ptr, body_c, env_ptr)
+    return result
+  end
+
   class FOR
     def libjit_compile(function, env)
       # var - an assignment node that gets executed each time through
@@ -341,15 +430,7 @@ class Node
       # 1. compile a nested function from the body of the loop
       # 2. pass this nested function as a parameter to 
 
-      env_ptr = env.address()
-
-      iter_signature = JIT::Type.create_signature(
-        JIT::ABI::CDECL,
-        JIT::Type::OBJECT,
-        [ JIT::Type::VOID_PTR ])
-      iter_f = JIT::Function.compile(function.context, iter_signature) do |f|
-        f.optimization_level = env.optimization_level
-
+      return libjit_iterate(function, env, self.var, self.body) do |f|
         ruby_sourceline = f.ruby_sourceline()
         n = f.const(JIT::Type::INT, self.iter.nd_line)
         f.insn_store_relative(ruby_sourceline, 0, n)
@@ -361,47 +442,14 @@ class Node
         id_each = f.const(JIT::Type::ID, :each)
         zero = f.const(JIT::Type::INT, 0)
         set_sourceline(function)
-        result = f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
-        f.insn_return(result)
+        f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
       end
+    end
+  end
 
-      body_signature = JIT::Type::create_signature(
-        JIT::ABI::CDECL,
-        JIT::Type::OBJECT,
-        [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
-      body_f = JIT::Function.compile(function.context, body_signature) do |f|
-        f.optimization_level = env.optimization_level
-
-        value = f.get_param(0)
-        outer_env_ptr = f.get_param(1)
-        inner_env = JIT::NodeCompileEnvironment.from_address(
-            f, outer_env_ptr, env.scope.local_names, env.optimization_level)
-
-        case self.var
-        when false
-        when LASGN then inner_env.scope.local_set(self.var.vid, value)
-        when DASGN_CURR then inner_env.scope.dyn_set(self.var.vid, value)
-        else raise "Can't handle #{self.var.class}"
-        end
-
-        if self.body then
-          ruby_sourceline = f.ruby_sourceline()
-          n = f.const(JIT::Type::INT, self.body.nd_line)
-          f.insn_store_relative(ruby_sourceline, 0, n)
-          result = self.body.libjit_compile(f, inner_env)
-        else
-          result = f.const(JIT::Type::OBJECT, nil)
-        end
-        f.insn_return(result)
-        # puts f
-      end
-
-      # TODO: will this leak memory if the function is redefined later?
-      iter_c = function.const(JIT::Type::VOID_PTR, iter_f.to_closure)
-      body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
-      set_sourceline(function)
-      result = function.insn_call_native(:rb_iterate, 0, iter_c, env_ptr, body_c, env_ptr)
-      return result
+  class NEXT
+    def libjit_compile(function, env)
+      env.next
     end
   end
 
@@ -414,15 +462,8 @@ class Node
       # 1. compile a nested function from the body of the loop
       # 2. pass this nested function as a parameter to 
 
-      env_ptr = env.address()
-
-      iter_signature = JIT::Type.create_signature(
-        JIT::ABI::CDECL,
-        JIT::Type::OBJECT,
-        [ JIT::Type::VOID_PTR ])
-      iter_f = JIT::Function.compile(function.context, iter_signature) do |f|
-        f.optimization_level = env.optimization_level
-
+      # TODO: I think ITER is supposed to get its own scope?
+      return libjit_iterate(function, env, self.var, self.body) do |f|
         ruby_sourceline = f.ruby_sourceline()
         n = f.const(JIT::Type::INT, self.iter.nd_line)
         f.insn_store_relative(ruby_sourceline, 0, n)
@@ -430,52 +471,8 @@ class Node
         outer_env_ptr = f.get_param(0)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
-        result = self.iter.libjit_compile(f, inner_env)
-        f.insn_return(result)
+        self.iter.libjit_compile(f, inner_env)
       end
-
-      # TODO: I think ITER is supposed to get its own scope?
-
-      body_signature = JIT::Type::create_signature(
-        JIT::ABI::CDECL,
-        JIT::Type::OBJECT,
-        [ JIT::Type::OBJECT, JIT::Type::VOID_PTR ])
-      body_f = JIT::Function.compile(function.context, body_signature) do |f|
-        f.optimization_level = env.optimization_level
-
-        value = f.get_param(0)
-        outer_env_ptr = f.get_param(1)
-        inner_env = JIT::NodeCompileEnvironment.from_address(
-            f, outer_env_ptr, env.scope.local_names, env.optimization_level)
-
-        case self.var
-        when false
-        when LASGN then
-          inner_env.scope.local_set(self.var.vid, value)
-        when MASGN then
-          self.var.head.to_a.each do |asgn|
-            raise "TODO"
-          end
-        else raise "Can't handle #{self.var.class}"
-        end
-
-        if self.body then
-          ruby_sourceline = f.ruby_sourceline()
-          n = f.const(JIT::Type::INT, self.body.nd_line)
-          f.insn_store_relative(ruby_sourceline, 0, n)
-          result = self.body.libjit_compile(f, inner_env)
-        else
-          result = f.const(JIT::Type::OBJECT, nil)
-        end
-        f.insn_return(result)
-      end
-
-      # TODO: will this leak memory if the function is redefined later?
-      iter_c = function.const(JIT::Type::VOID_PTR, iter_f.to_closure)
-      body_c = function.const(JIT::Type::VOID_PTR, body_f.to_closure)
-      set_sourceline(function)
-      result = function.insn_call_native(:rb_iterate, 0, iter_c, env_ptr, body_c, env_ptr)
-      return result
     end
   end
 
@@ -494,7 +491,10 @@ class Node
       end
       function.insn_label(else_label)
       if self.else then
-        function.insn_store(result, self.else.libjit_compile(function, env))
+        # there might be a return inside the else, in which case we
+        # don't want to store the result (which wouldn't work)
+        else_result = self.else.libjit_compile(function, env)
+        function.insn_store(result, else_result) if else_result
         function.insn_label(end_label)
       end
       return result
@@ -592,7 +592,7 @@ class Node
         a = a.next
       end
       return hash
-      pp self
+      # pp self
     end
   end
 
@@ -696,31 +696,24 @@ module JIT
     # TODO: This function isn't right
     def self.from_address(function, address, local_names)
       scope_type = JIT::Type.create_struct(
+          [ JIT::Type::OBJECT ] + \
           [ JIT::Type::OBJECT ] * local_names.size
       )
-      # scope = function.insn_load_relative(function, address, 0, scope_type)
       locals = {}
       local_names.each_with_index do |name, idx|
-        locals[name] = NodeLocalVariable.new(
-            function,
-            name)
-        locals[name].set_addressable(address, scope_type.get_offset(idx))
+        locals[name] = NodeLocalVariable.new(function, name)
+        offset = scope_type.get_offset(idx+1)
+        locals[name].set_addressable(address, offset) 
       end
       return self.new(function, local_names, locals, address)
     end
 
-    DYNAVARS_NAME = :':dynavars:'
-
     def initialize(function, local_names, locals=nil, scope_ptr=nil)
       @function = function
 
-      if locals then
-        @local_names = local_names
-      else
-        @local_names = [ DYNAVARS_NAME ] + local_names
-      end
-
+      @local_names = local_names
       @scope_type = JIT::Type.create_struct(
+          [ JIT::Type::OBJECT ] + \
           [ JIT::Type::OBJECT ] * @local_names.size
       )
 
@@ -729,12 +722,14 @@ module JIT
       else
         @locals = {}
         @local_names.each do |name|
-          create_local(name)
+          @locals[name] = NodeLocalVariable.new(@function, name)
         end
       end
 
       if scope_ptr then
         @scope_ptr = scope_ptr
+        @dynavars = NodeLocalVariable.new(@function, "DYNAVARS")
+        @dynavars.set_addressable(@scope_ptr, 0)
       end
     end
 
@@ -749,34 +744,28 @@ module JIT
 
     # TODO: a hash is easy to use, but maybe not very fast
     def dyn_set(vid, value)
-      create_dynavars()
       name = @function.const(JIT::Type::OBJECT, vid)
-      @function.insn_call_native(:rb_hash_aset, 0, @dynavars, name, value)
+      @function.insn_call_native(:rb_hash_aset, 0, @dynavars.get, name, value)
     end
 
     def dyn_get(vid)
-      create_dynavars()
       name = @function.const(JIT::Type::OBJECT, vid)
-      return @function.insn_call_native(:rb_hash_aref, 0, @dynavars, name)
-    end
-
-    def create_dynavars
-      if not defined?(@dynavars) then
-        @dynavars = @function.insn_call_native(:rb_hash_new, 0)
-        local_set(DYNAVARS_NAME, @dynavars)
-      end
-    end
-
-    def create_local(name)
-      @locals[name] = NodeLocalVariable.new(@function, name)
+      value = @function.insn_call_native(:rb_hash_aref, 0, @dynavars.get, name)
+      return value
     end
 
     def address
       if not defined?(@scope_ptr) then
         @scope = @function.value(@scope_type)
         @scope_ptr = @function.insn_address_of(@scope)
+
+        raise "should not happen" if defined?(@dynavars)
+        @dynavars = NodeLocalVariable.new(@function, "DYNAVARS")
+        @dynavars.set_addressable(@scope_ptr, 0)
+        @dynavars.set(@function.insn_call_native(:rb_hash_new, 0))
+
         @local_names.each_with_index do |name, idx|
-          offset = @scope_type.get_offset(idx)
+          offset = @scope_type.get_offset(idx+1)
           @locals[name].set_addressable(@scope_ptr, offset) if @locals[name]
         end
       end
@@ -795,6 +784,7 @@ module JIT
       @frame = frame
       @scope = scope
       @scope_stack = []
+      @loop_end_labels = []
     end
 
     # def push_scope
@@ -814,8 +804,26 @@ module JIT
       frame_ptr = function.insn_load_relative(address, 0, JIT::Type::VOID_PTR)
       scope_ptr = function.insn_load_relative(address, 4, JIT::Type::VOID_PTR)
       frame = JIT::NodeCompileFrame.from_address(function, frame_ptr)
-      scope = JIT::NodeCompileScope.from_address(function, scope_ptr, local_names) # TODO
+      scope = JIT::NodeCompileScope.from_address(function, scope_ptr, local_names)
       env = JIT::NodeCompileEnvironment.new(function, optimization_level, frame, scope)
+    end
+
+    def loop
+      @loop_end_labels.push(JIT::Label.new)
+      retval = nil
+      begin
+        yield
+      ensure
+        label = @loop_end_labels.pop
+        @function.insn_label(label)
+        retval = @function.const(JIT::Type::OBJECT, nil) # TODO
+      end
+      #@function.insn_return(retval)
+      return retval
+    end
+
+    def next
+      @function.insn_branch(@loop_end_labels[-1])
     end
   end
 end
@@ -929,7 +937,7 @@ def hash_access_II(n=20)
 end   
 
 m = method(:hash_access_II)
-pp m.body
+# pp m.body
 f = m.libjit_compile
 puts "Compiled"
 p f.apply(self)
