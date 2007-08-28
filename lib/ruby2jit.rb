@@ -243,6 +243,8 @@ class Node
       case lhs
       when LASGN
         env.scope.local_set(lhs.vid, v)
+      when DASGN_CURR
+        env.scope.dyn_set(lhs.vid, v)
       else
         raise "Can't handle #{lhs.class}"
       end
@@ -427,6 +429,7 @@ class Node
         when false
         when LASGN then inner_env.scope.local_set(var.vid, value)
         when DASGN_CURR then inner_env.scope.dyn_set(var.vid, value)
+        when MASGN then libjit_massign(f, inner_env, var.head.to_a, value)
         else raise "Can't handle #{self.var.class}"
         end
 
