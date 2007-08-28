@@ -4,17 +4,21 @@ require "benchmark"
 require "getoptlong"
 include Benchmark
 
+class Symbol
+  def <=>(rhs)
+    self.to_s <=> rhs.to_s
+  end
+end
+
 opts = GetoptLong.new(*[
     [ '--test', GetoptLong::REQUIRED_ARGUMENT ],
     [ '--jit', GetoptLong::NO_ARGUMENT ],
 ])
 
-max = 300000
-
 tests = {
   :ack => [
     "Ackermann function",
-    proc { max.times { ack } }
+    proc { 300000.times { ack } }
   ],
   :array => [
     "Array access",
@@ -22,7 +26,7 @@ tests = {
   ],
   :fib => [
     "Fibonacci numbers",
-    proc { max.times { fib } }
+    proc { 30.times { fib } }
   ],
   :hash1 => [
     "Hash access I",
@@ -48,6 +52,14 @@ tests = {
     "Word Frequency",
     proc { 1000.times { word_frequency } }
   ],
+  :gcd_iter => [
+    "GCD (iterative)",
+    proc { 10000.times{ gcd_iter } }
+  ],
+  :gcd_recur => [
+    "GCD (recursive)",
+    proc { 2000.times{ gcd_recur } }
+  ],
 }
 
 jit = false
@@ -70,8 +82,7 @@ end
 
 if jit then
   require "ruby2jit"
-  # [ :ack, :array_access, :fib, :hash_access_I, :hash_access_II, :lists, :nested_loop, :sieve_of_eratosthenes, :statistical_moments, :word_frequency ].each do |name|
-  [ :ack, :array_access, :fib, :hash_access_I, :nested_loop, :statistical_moments ].each do |name|
+  [ :ack, :array_access, :fib, :hash_access_I, :hash_access_II, :lists, :nested_loop, :sieve_of_eratosthenes, :statistical_moments, :word_frequency, :gcd_iter, :gcd_recur ].each do |name|
     puts "Compiling #{name}"
     f = method(name).libjit_compile
     Object.instance_eval { remove_method(name) }
@@ -88,10 +99,14 @@ widths = tests.map { |name, test_info| test_info[0].length }
 max_width = widths.max
 
 bm(max_width) do |x|
-  tests.each do |name, test_info|
+  tests.sort.each do |name, test_info|
     label = test_info[0]
     p = test_info[1]
-    x.report(label, &p)
+    begin
+      x.report(label, &p)
+    rescue Exception
+      puts $!
+    end
   end
 end
 
