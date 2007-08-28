@@ -205,26 +205,58 @@ class Node
     end
   end
 
+  def libjit_massign(function, env, mlhs, rhs)
+    set_sourceline(function)
+    lhs_len = function.const(JIT::Type::INT, mlhs.length)
+    id_length = function.const(JIT::Type::ID, :length)
+    rhs_len = function.insn_call_native(
+        :rb_funcall, 0, rhs, id_length, function.const(JIT::Type::INT, 0))
+    mlhs.each_with_index do |lhs, idx|
+      if idx < mlhs.size-1 then
+        v = function.insn_call_native(:rb_ary_entry, 0, rhs, function.const(JIT::Type::INT, idx))
+      else
+        v = function.value(JIT::Type::OBJECT)
+        multi_label = JIT::Label.new
+        done = JIT::Label.new
+        i = function.const(JIT::Type::OBJECT, idx)
+        multi = (lhs_len < rhs_len)
+        function.insn_branch_if(multi, multi_label)
+        function.insn_store(v, function.insn_call_native(
+            :rb_ary_entry,
+            0,
+            rhs,
+            function.const(JIT::Type::INT, idx)))
+        function.insn_branch(done)
+        function.insn_label(multi_label)
+        id_slice = function.const(JIT::Type::ID, :slice)
+        function.insn_store(v, function.insn_call_native(
+            :rb_funcall,
+            0,
+            rhs,
+            id_slice,
+            function.const(JIT::Type::INT, 2),
+            i,
+            function.const(JIT::Type::OBJECT, -1)))
+        function.insn_label(done)
+      end
+
+      case lhs
+      when LASGN
+        env.scope.local_set(lhs.vid, v)
+      else
+        raise "Can't handle #{lhs.class}"
+      end
+    end
+
+    return rhs
+  end
+
   class MASGN
     def libjit_compile(function, env)
-      n = function.const(JIT::Type::INT, a.length)
       set_sourceline(function)
-      ary = function.insn_call_native(:rb_ary_new2, 0, n)
       mlhs = self.head.to_a
-      mrhs = self.next.to_a
-      mlhs.each_with_index do |lhs, idx|
-        rhs = mhrs[idx]
-        case lhs
-        when LASGN
-          env.scope.local_set(lhs.vid, rhs)
-        else
-          raise "Can't handle #{lhs.class}"
-        end
-        i = function.const(JIT::Type::INT, idx)
-        set_sourceline(function)
-        function.insn_call_native(:rb_ary_store, 0, ary, i, rhs)
-      end
-      return ary
+      rhs = self.value.libjit_compile(function, env)
+      return libjit_massign(function, env, mlhs, rhs)
     end
   end
 
@@ -579,6 +611,13 @@ class Node
     end
   end
 
+  class TO_ARY
+    def libjit_compile(function, env)
+      lit = self.head.libjit_compile(function, env)
+      return function.insn_call_native(:rb_ary_to_ary, 0, lit)
+    end
+  end
+
   class HASH
     def libjit_compile(function, env)
       set_sourceline(function)
@@ -921,22 +960,13 @@ if __FILE__ == $0 then
 
   require 'nodepp'
 
-def hash_access_II(n=20)
-   hash1 = {}
-   for i in 0 .. 9999
-      hash1["foo_" << i.to_s] = i
-   end
-
-   hash2 = Hash.new(0)
-   n.times do |i|
-      for k in hash1.keys
-        # p k
-         hash2[k] += hash1[k]
-      end
-   end
+def foo(n=20)
+  x = (a, b = 1)
+  p a, b
+  return x
 end   
 
-m = method(:hash_access_II)
+m = method(:foo)
 # pp m.body
 f = m.libjit_compile
 puts "Compiled"
