@@ -347,6 +347,28 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         RARRAY(args)->len,
         1);
   }
+  else if(SYM2ID(name) == rb_intern("rb_funcall3"))
+  {
+    /* TODO: what to do about exceptions? */
+    /* TODO: validate num args? */
+
+    VALUE sprintf_args[] = {
+        rb_str_new2("%s(%s)"),
+        name,
+        ID2SYM(jit_value_get_nint_constant(j_args[1])),
+    };
+
+    name = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
+    j_name = STR2CSTR(name);
+    native_func = (void *)rb_funcall3;
+    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID, jit_type_int, jit_type_void_ptr };
+    signature = jit_type_create_signature(
+        jit_abi_cdecl, /* TODO: vararg? */
+        jit_type_VALUE,
+        param_types,
+        RARRAY(args)->len,
+        1);
+  }
   else if(SYM2ID(name) == rb_intern("rb_iterate"))
   {
     native_func = (void *)rb_iterate;
@@ -1077,6 +1099,7 @@ void Init_jit()
   rb_define_method(rb_cFunction, "context", function_get_context, 0);
   rb_define_method(rb_cFunction, "compiled?", function_is_compiled, 0);
   rb_define_method(rb_cFunction, "ruby_array_length", function_ruby_array_length, 1);
+  rb_define_method(rb_cFunction, "ruby_array_ptr", function_ruby_array_ptr, 1);
 
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);

@@ -89,10 +89,11 @@ class Node
     end
   end
 
-  def libjit_compile_cal_dyn(function, env, recv, mid, a)
+  def libjit_compile_call_dyn(function, env, recv, mid, a)
+    id = function.const(JIT::Type::ID, mid)
     num_args = function.ruby_array_length(a)
     array_ptr = function.ruby_array_ptr(a)
-    return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, array_ptr)
+    return function.insn_call_native(:rb_funcall3, 0, recv, id, num_args, array_ptr)
   end
 
   def libjit_compile_call(function, env, recv, mid, args)
@@ -107,7 +108,7 @@ class Node
     else
       # number of args only known at runtime
       a = args.libjit_compile(function, env)
-      return libjit_compile_call_dyn(functino, env, recv, mid, a)
+      return libjit_compile_call_dyn(function, env, recv, mid, a)
     end
 
     result = function.value(JIT::Type::OBJECT)
@@ -686,6 +687,16 @@ class Node
       exclude_end = function.const(JIT::Type::INT, 1)
       set_source(function)
       return function.insn_call_native(:rb_range_new, 0, range_begin, range_end, exclude_end)
+    end
+  end
+
+  class SPLAT
+    def libjit_compile(function, env)
+      # TODO: Optimization: don't call to_a for an array
+      recv = self.head.libjit_compile(function, env)
+      mid = function.const(JIT::Type::ID, :to_a)
+      num_args = function.const(JIT::Type::INT, 0)
+      return function.insn_call_native(:rb_funcall, 0, recv, mid, num_args)
     end
   end
 end
