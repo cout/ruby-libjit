@@ -496,6 +496,17 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         1,
         1);
   }
+  else if(SYM2ID(name) == rb_intern("rb_ivar_get"))
+  {
+    native_func = (void *)rb_ivar_get;
+    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID };
+    signature = jit_type_create_signature(
+        jit_abi_cdecl,
+        jit_type_VALUE,
+        param_types,
+        2,
+        1);
+  }
   else
   {
     rb_raise(rb_eArgError, "Invalid native function %s", j_name);

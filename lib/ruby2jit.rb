@@ -80,6 +80,12 @@ class Node
     end
   end
 
+  class SELF
+    def libjit_compile(function, env)
+      return env.frame.self
+    end
+  end
+
   def libjit_compile_call(function, env, recv, mid, args)
     end_label = JIT::Label.new
 
@@ -151,7 +157,7 @@ class Node
         function.insn_store_elem(array_ptr, function.const(JIT::Type::INT, idx), arg)
       end
       id = function.const(JIT::Type::ID, mid)
-      recv = function.const(JIT::Type::OBJECT, env.frame.self)
+      recv = env.frame.self
       set_sourceline(function)
       return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, array_ptr)
     end
@@ -202,6 +208,13 @@ class Node
   class DVAR
     def libjit_compile(function, env)
       env.scope.dyn_get(self.vid)
+    end
+  end
+
+  class IVAR
+    def libjit_compile(function, env)
+      vid = function.const(JIT::Type::ID, self.vid)
+      return function.insn_call_native(:rb_ivar_get, 0, env.frame.self, vid)
     end
   end
 
@@ -541,7 +554,7 @@ class Node
       is_false = self.body.to_libjit_inverted_bool(function, env)
       # 0 => 0 (Qfalse); 1 => 2 (Qtrue)
       one = function.const(JIT::Type::INT, 1)
-      return function.insn_ushl(is_false, one)
+      return function.insn_shl(is_false, one)
     end
   end
 
@@ -870,7 +883,9 @@ module JIT
   end
 end
 
-class Method
+module JIT
+
+module MethodCompiler
   def libjit_compile(optimization_level=2)
     msig = self.signature
     if self.arity >= 0 then
@@ -957,6 +972,16 @@ class Method
       return function
     end
   end
+end
+
+end # JIT
+
+class Method
+  include JIT::MethodCompiler
+end
+
+class UnboundMethod
+  include JIT::MethodCompiler
 end
 
 if __FILE__ == $0 then
