@@ -17,6 +17,7 @@ static VALUE rb_mCall;
 static jit_type_t jit_type_VALUE;
 static jit_type_t jit_type_ID;
 static jit_type_t jit_type_CSTRING;
+static jit_type_t jit_type_CLONG;
 
 static jit_type_t ruby_vararg_signature;
 
@@ -34,6 +35,7 @@ typedef jit_uint jit_VALUE;
 typedef jit_uint jit_ID;
 #define jit_underlying_type_ID jit_type_uint
 #define SET_CONSTANT_ID(c, v) c.un.uint_value = v;
+#define jit_underlying_type_CLONG jit_type_int
 
 /* TODO: Need better (more consistent) names for these */
 enum User_Defined_Tag
@@ -41,6 +43,7 @@ enum User_Defined_Tag
   OBJECT_TAG,
   ID_TAG,
   CSTRING_TAG,
+  CLONG_TAG,
   RUBY_VARARG_SIGNATURE_TAG,
 };
 
@@ -641,6 +644,9 @@ static VALUE function_value(VALUE self, VALUE type)
   check_type("type", rb_cType, type);
   Data_Get_Struct(type, struct _jit_type, j_type);
 
+  // TODO: When we wrap a value, we should inject a reference to the
+  // function in the object, so the function stays around as long as the
+  // value does
   v = jit_value_create(function, j_type);
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
 }
@@ -800,6 +806,30 @@ static VALUE function_is_compiled(VALUE self)
   jit_function_t function;
   Data_Get_Struct(self, struct _jit_function, function);
   return jit_function_is_compiled(function) ? Qtrue : Qfalse;
+}
+
+// TODO: Provide offsetof functions for all the basic types (and make
+// this function go away)
+static VALUE function_ruby_array_length(VALUE self, VALUE array)
+{
+  jit_function_t function;
+  Data_Get_Struct(self, struct _jit_function, function);
+  jit_value_t j_array;
+  Data_Get_Struct(array, struct _jit_value, j_array);
+  jit_value_t length = jit_insn_load_relative(
+      function, j_array, offsetof(struct RArray, len), jit_type_CLONG);
+  return Data_Wrap_Struct(rb_cValue, 0, 0, length);
+}
+
+static VALUE function_ruby_array_ptr(VALUE self, VALUE array)
+{
+  jit_function_t function;
+  Data_Get_Struct(self, struct _jit_function, function);
+  jit_value_t j_array;
+  Data_Get_Struct(array, struct _jit_value, j_array);
+  jit_value_t length = jit_insn_load_relative(
+      function, j_array, offsetof(struct RArray, ptr), jit_type_void_ptr);
+  return Data_Wrap_Struct(rb_cValue, 0, 0, length);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1046,6 +1076,7 @@ void Init_jit()
   rb_define_method(rb_cFunction, "to_closure", function_to_closure, 0);
   rb_define_method(rb_cFunction, "context", function_get_context, 0);
   rb_define_method(rb_cFunction, "compiled?", function_is_compiled, 0);
+  rb_define_method(rb_cFunction, "ruby_array_length", function_ruby_array_length, 1);
 
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
@@ -1075,6 +1106,9 @@ void Init_jit()
 
   jit_type_CSTRING = jit_type_create_tagged(jit_type_void_ptr, CSTRING_TAG, 0, 0, 1);
   rb_define_const(rb_cType, "CSTRING", wrap_type(jit_type_CSTRING));
+
+  jit_type_CLONG = jit_type_create_tagged(jit_underlying_type_CLONG, CLONG_TAG, 0, 0, 1);
+  rb_define_const(rb_cType, "CLONG", wrap_type(jit_type_CLONG));
 
   {
     jit_type_t ruby_vararg_param_types[] = { jit_type_int, jit_type_void_ptr, jit_type_VALUE };

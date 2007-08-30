@@ -89,13 +89,25 @@ class Node
     end
   end
 
+  def libjit_compile_cal_dyn(function, env, recv, mid, a)
+    num_args = function.ruby_array_length(a)
+    array_ptr = function.ruby_array_ptr(a)
+    return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, array_ptr)
+  end
+
   def libjit_compile_call(function, env, recv, mid, args)
     end_label = JIT::Label.new
 
-    if args then
+    if ARRAY === args then
+      # number of args known at compile time
       args = args.to_a.map { |arg| arg.libjit_compile(function, env) }
-    else
+    elsif not args then
+      # no args, known at compile time
       args = []
+    else
+      # number of args only known at runtime
+      a = args.libjit_compile(function, env)
+      return libjit_compile_call_dyn(functino, env, recv, mid, a)
     end
 
     result = function.value(JIT::Type::OBJECT)
