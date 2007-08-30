@@ -157,6 +157,20 @@ class Node
     end
   end
 
+  def libjit_compile_fcall(function, env, mid, args)
+    num_args = function.const(JIT::Type::INT, args.length)
+    array_type = JIT::Type.create_struct([ JIT::Type::OBJECT ] * args.length)
+    array = function.value(array_type)
+    array_ptr = function.insn_address_of(array)
+    args.each_with_index do |arg, idx|
+      function.insn_store_elem(array_ptr, function.const(JIT::Type::INT, idx), arg)
+    end
+    id = function.const(JIT::Type::ID, mid)
+    recv = env.frame.self
+    set_source(function)
+    return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, array_ptr)
+  end
+
   class FCALL
     def libjit_compile(function, env)
       mid = self.mid
@@ -165,17 +179,23 @@ class Node
       else
         args = []
       end
-      num_args = function.const(JIT::Type::INT, args.length)
-      array_type = JIT::Type.create_struct([ JIT::Type::OBJECT ] * args.length)
-      array = function.value(array_type)
-      array_ptr = function.insn_address_of(array)
-      args.each_with_index do |arg, idx|
-        function.insn_store_elem(array_ptr, function.const(JIT::Type::INT, idx), arg)
-      end
-      id = function.const(JIT::Type::ID, mid)
-      recv = env.frame.self
-      set_source(function)
-      return function.insn_call_native(:rb_funcall2, 0, recv, id, num_args, array_ptr)
+      libjit_compile_fcall(function, env, mid, args)
+    end
+  end
+
+  class VCALL
+    def libjit_compile(function, env)
+      retval = function.value(JIT::Type::OBJECT)
+      has_key = env.scope.dyn_defined(self.mid)
+      do_fcall_label = JIT::Label.new
+      done_label = JIT::Label.new
+      function.insn_branch_if_not(has_key, do_fcall_label)
+      function.insn_store(retval, env.scope.dyn_get(self.mid))
+      function.insn_branch(done_label)
+      function.insn_label(do_fcall_label)
+      function.insn_store(retval, libjit_compile_fcall(function, env, mid, []))
+      function.insn_label(done_label)
+      return retval
     end
   end
 
@@ -829,14 +849,25 @@ module JIT
 
     # TODO: a hash is easy to use, but maybe not very fast
     def dyn_set(vid, value)
+      address()
       name = @function.const(JIT::Type::OBJECT, vid)
       @function.insn_call_native(:rb_hash_aset, 0, @dynavars.get, name, value)
     end
 
     def dyn_get(vid)
+      address()
       name = @function.const(JIT::Type::OBJECT, vid)
       value = @function.insn_call_native(:rb_hash_aref, 0, @dynavars.get, name)
       return value
+    end
+
+    def dyn_defined(vid)
+      address()
+      id_has_key = @function.const(JIT::Type::ID, :has_key?)
+      name = @function.const(JIT::Type::OBJECT, vid)
+      has_key = @function.insn_call_native(
+          :rb_funcall, 0, @dynavars.get, id_has_key, @function.const(JIT::Type::INT, 1), name)
+      return has_key # 0 will be false
     end
 
     def address
