@@ -1,7 +1,8 @@
 #ruby <<END
 
 V = :value
-L = :label
+L = :label_ptr
+B = :label
 N = :nint
 T = :type_t
 _ = :void
@@ -15,6 +16,7 @@ def declaration(name, type)
   case type
   when V then return "jit_value_t #{name};"
   when L then return "jit_label_t * #{name};"
+  when B then return "jit_label_t * #{name};"
   when N then return "jit_nint #{name};"
   when T then return "jit_type_t #{name};"
   when :void then nil
@@ -33,6 +35,7 @@ def ruby_type(type)
   case type
   when V then return "rb_cValue"
   when L then return "rb_cLabel"
+  when B then return "rb_cLabel"
   when N then return "rb_cFixnum"
   when T then return "rb_cType"
   else raise "Invalid type #{type}"
@@ -43,6 +46,7 @@ def jit_type(type)
   case type
   when V then return "struct _jit_value"
   when L then return "jit_label_t"
+  when B then return "jit_label_t"
   when T then return "struct _jit_type"
   else raise "Invalid type #{type}"
   end
@@ -59,7 +63,13 @@ end
 
 def jit_insn_args(arg_types)
   num_args = arg_types.length
-  return (1..num_args).map { |n| "j_arg#{n}" }.join(', ');
+  arg_list = (1..num_args).map do |n|
+    case arg_types[n-1]
+    when B then "*j_arg#{n}"
+    else "j_arg#{n}"
+    end
+  end
+  return arg_list.join(', ');
 end
 
 def write_insn(name, retval_type, arg_types)
@@ -94,73 +104,75 @@ def write_insn(name, retval_type, arg_types)
 end
 
 insns = [
-  [ 'store'            , _, V, V    ] ,
-  [ 'add'              , V, V, V    ] , 
-  [ 'add_ovf'          , V, V, V    ] , 
-  [ 'sub'              , V, V, V    ] , 
-  [ 'sub_ovf'          , V, V, V    ] , 
-  [ 'mul'              , V, V, V    ] , 
-  [ 'mul_ovf'          , V, V, V    ] , 
-  [ 'div'              , V, V, V    ] , 
-  [ 'rem'              , V, V, V    ] , 
-  [ 'rem_ieee'         , V, V, V    ] , 
-  [ 'neg'              , V, V       ] , 
-  [ 'and'              , V, V, V    ] , 
-  [ 'or'               , V, V, V    ] , 
-  [ 'xor'              , V, V, V    ] , 
-  [ 'not'              , V, V       ] , 
-  [ 'shl'              , V, V, V    ] , 
-  [ 'shr'              , V, V, V    ] , 
-  [ 'ushr'             , V, V, V    ] , 
-  [ 'sshr'             , V, V, V    ] , 
-  [ 'eq'               , V, V, V    ] , 
-  [ 'ne'               , V, V, V    ] , 
-  [ 'lt'               , V, V, V    ] , 
-  [ 'le'               , V, V, V    ] , 
-  [ 'gt'               , V, V, V    ] , 
-  [ 'ge'               , V, V, V    ] , 
-  [ 'cmpl'             , V, V, V    ] , 
-  [ 'cmpg'             , V, V, V    ] , 
-  [ 'to_bool'          , V, V       ] , 
-  [ 'to_not_bool'      , V, V       ] , 
-  [ 'acos'             , V, V       ] , 
-  [ 'asin'             , V, V       ] , 
-  [ 'atan'             , V, V       ] , 
-  [ 'atan2'            , V, V, V    ] ,
-  [ 'ceil'             , V, V       ] , 
-  [ 'cos'              , V, V       ] , 
-  [ 'cosh'             , V, V       ] , 
-  [ 'exp'              , V, V       ] , 
-  [ 'floor'            , V, V       ] , 
-  [ 'log'              , V, V       ] , 
-  [ 'log10'            , V, V       ] , 
-  [ 'pow'              , V, V, V    ] ,
-  [ 'rint'             , V, V       ] , 
-  [ 'round'            , V, V       ] , 
-  [ 'sin'              , V, V       ] , 
-  [ 'sinh'             , V, V       ] , 
-  [ 'sqrt'             , V, V       ] , 
-  [ 'tan'              , V, V       ] , 
-  [ 'tanh'             , V, V       ] , 
-  [ 'is_nan'           , V, V       ] , 
-  [ 'is_finite'        , V, V       ] , 
-  [ 'is_inf'           , V, V       ] , 
-  [ 'abs'              , V, V       ] , 
-  [ 'min'              , V, V, V    ] , 
-  [ 'max'              , V, V, V    ] , 
-  [ 'sign'             , V, V       ] , 
-  [ 'return'           , _, V       ] ,
-  [ 'branch'           , _, L       ] ,
-  [ 'branch_if'        , _, V, L    ] ,
-  [ 'branch_if_not'    , _, V, L    ] ,
-  [ 'label'            , _, L       ] ,
-  [ 'address_of'       , V, V       ] ,
-  [ 'address_of_label' , V, L       ] ,
-  [ 'store_relative'   , _, V, N, V ] ,
-  [ 'load_relative'    , V, V, N, T ] ,
-  [ 'alloca'           , V, V       ] ,
-  [ 'load_elem'        , V, V, V, T ] ,
-  [ 'store_elem'       , _, V, V, V ] ,
+  [ 'store'                , _, V, V    ] ,
+  [ 'add'                  , V, V, V    ] , 
+  [ 'add_ovf'              , V, V, V    ] , 
+  [ 'sub'                  , V, V, V    ] , 
+  [ 'sub_ovf'              , V, V, V    ] , 
+  [ 'mul'                  , V, V, V    ] , 
+  [ 'mul_ovf'              , V, V, V    ] , 
+  [ 'div'                  , V, V, V    ] , 
+  [ 'rem'                  , V, V, V    ] , 
+  [ 'rem_ieee'             , V, V, V    ] , 
+  [ 'neg'                  , V, V       ] , 
+  [ 'and'                  , V, V, V    ] , 
+  [ 'or'                   , V, V, V    ] , 
+  [ 'xor'                  , V, V, V    ] , 
+  [ 'not'                  , V, V       ] , 
+  [ 'shl'                  , V, V, V    ] , 
+  [ 'shr'                  , V, V, V    ] , 
+  [ 'ushr'                 , V, V, V    ] , 
+  [ 'sshr'                 , V, V, V    ] , 
+  [ 'eq'                   , V, V, V    ] , 
+  [ 'ne'                   , V, V, V    ] , 
+  [ 'lt'                   , V, V, V    ] , 
+  [ 'le'                   , V, V, V    ] , 
+  [ 'gt'                   , V, V, V    ] , 
+  [ 'ge'                   , V, V, V    ] , 
+  [ 'cmpl'                 , V, V, V    ] , 
+  [ 'cmpg'                 , V, V, V    ] , 
+  [ 'to_bool'              , V, V       ] , 
+  [ 'to_not_bool'          , V, V       ] , 
+  [ 'acos'                 , V, V       ] , 
+  [ 'asin'                 , V, V       ] , 
+  [ 'atan'                 , V, V       ] , 
+  [ 'atan2'                , V, V, V    ] ,
+  [ 'ceil'                 , V, V       ] , 
+  [ 'cos'                  , V, V       ] , 
+  [ 'cosh'                 , V, V       ] , 
+  [ 'exp'                  , V, V       ] , 
+  [ 'floor'                , V, V       ] , 
+  [ 'log'                  , V, V       ] , 
+  [ 'log10'                , V, V       ] , 
+  [ 'pow'                  , V, V, V    ] ,
+  [ 'rint'                 , V, V       ] , 
+  [ 'round'                , V, V       ] , 
+  [ 'sin'                  , V, V       ] , 
+  [ 'sinh'                 , V, V       ] , 
+  [ 'sqrt'                 , V, V       ] , 
+  [ 'tan'                  , V, V       ] , 
+  [ 'tanh'                 , V, V       ] , 
+  [ 'is_nan'               , V, V       ] , 
+  [ 'is_finite'            , V, V       ] , 
+  [ 'is_inf'               , V, V       ] , 
+  [ 'abs'                  , V, V       ] , 
+  [ 'min'                  , V, V, V    ] , 
+  [ 'max'                  , V, V, V    ] , 
+  [ 'sign'                 , V, V       ] , 
+  [ 'return'               , _, V       ] ,
+  [ 'branch'               , _, L       ] ,
+  [ 'branch_if'            , _, V, L    ] ,
+  [ 'branch_if_not'        , _, V, L    ] ,
+  [ 'label'                , _, L       ] ,
+  [ 'address_of'           , V, V       ] ,
+  [ 'address_of_label'     , V, L       ] ,
+  [ 'store_relative'       , _, V, N, V ] ,
+  [ 'load_relative'        , V, V, N, T ] ,
+  [ 'alloca'               , V, V       ] ,
+  [ 'load_elem'            , V, V, V, T ] ,
+  [ 'store_elem'           , _, V, V, V ] ,
+  [ 'move_blocks_to_end'   , _, B, B    ] ,
+  [ 'move_blocks_to_start' , _, B, B    ] ,
 ]
 
 insns.each do |name, retval_type, *arg_types|

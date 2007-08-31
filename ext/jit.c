@@ -5,6 +5,8 @@
 #include "jit/jit-dump.h"
 #include "ruby.h"
 
+#include "node.h" // TODO
+
 static VALUE rb_mJIT;
 static VALUE rb_cContext;
 static VALUE rb_cFunction;
@@ -746,6 +748,7 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
 }
 
+/*
 static VALUE function_ruby_sourceline(VALUE self)
 {
   jit_type_t ptr_type = jit_type_create_pointer(jit_type_int, 1);
@@ -774,6 +777,44 @@ static VALUE function_ruby_sourcefile(VALUE self)
   v = jit_value_create_constant(function, &c);
 
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
+}
+*/
+
+// TODO: move this to a different file
+static VALUE function_set_ruby_source(VALUE self, VALUE node)
+{
+  NODE * n;
+  jit_function_t function;
+
+  Data_Get_Struct(self, struct _jit_function, function);
+  Data_Get_Struct(node, NODE, n); // TODO: type check
+
+  VALUE value_objects = (VALUE)jit_function_get_meta(function, VALUE_OBJECTS);
+
+  jit_constant_t c;
+
+  c.type = jit_type_int;
+  c.un.int_value = nd_line(n);
+  jit_value_t line = jit_value_create_constant(function, &c);
+
+  c.type = jit_type_void_ptr;
+  c.un.ptr_value = n->nd_file;
+  jit_value_t file = jit_value_create_constant(function, &c);
+
+  c.type = jit_type_void_ptr;
+  c.un.ptr_value = &ruby_sourceline;
+  jit_value_t ruby_sourceline_ptr = jit_value_create_constant(function, &c);
+
+  c.type = jit_type_void_ptr;
+  c.un.ptr_value = &ruby_sourcefile;
+  jit_value_t ruby_sourcefile_ptr = jit_value_create_constant(function, &c);
+
+  jit_insn_store_relative(function, ruby_sourceline_ptr, 0, line);
+  jit_insn_store_relative(function, ruby_sourcefile_ptr, 0, file);
+
+  rb_ary_push(value_objects, node);
+
+  return Qnil;
 }
 
 static VALUE function_optimization_level(VALUE self)
@@ -1089,8 +1130,11 @@ void Init_jit()
   rb_define_alias(rb_cFunction, "call", "apply");
   rb_define_method(rb_cFunction, "value", function_value, 1);
   rb_define_method(rb_cFunction, "const", function_const, 2);
+  /*
   rb_define_method(rb_cFunction, "ruby_sourceline", function_ruby_sourceline, 0);
   rb_define_method(rb_cFunction, "ruby_sourcefile", function_ruby_sourcefile, 0);
+  */
+  rb_define_method(rb_cFunction, "set_ruby_source", function_set_ruby_source, 1); // TODO
   rb_define_method(rb_cFunction, "optimization_level", function_optimization_level, 0);
   rb_define_method(rb_cFunction, "optimization_level=", function_set_optimization_level, 1);
   rb_define_singleton_method(rb_cFunction, "max_optimization_level", function_max_optimization_level, 0);

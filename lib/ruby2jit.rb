@@ -57,12 +57,27 @@ end
 
 class Node
   def set_source(function)
-    ruby_sourceline = function.ruby_sourceline()
-    n = function.const(JIT::Type::INT, self.nd_line)
-    function.insn_store_relative(ruby_sourceline, 0, n)
-    ruby_sourcefile = function.ruby_sourcefile()
-    file = function.const(JIT::Type::CSTRING, self.nd_file)
-    function.insn_store_relative(ruby_sourcefile, 0, file)
+    # ruby_sourceline = function.ruby_sourceline()
+    # n = function.const(JIT::Type::INT, self.nd_line)
+    # function.insn_store_relative(ruby_sourceline, 0, n)
+    # ruby_sourcefile = function.ruby_sourcefile()
+    # file = function.const(JIT::Type::CSTRING, self.nd_file)
+    # function.insn_store_relative(ruby_sourcefile, 0, file)
+    function.set_ruby_source(self)
+  end
+
+  def libjit_needs_addressable_scope
+    if self.class.const_defined?(:LIBJIT_NEEDS_ADDRESSABLE_SCOPE) then
+      return true
+    end
+    needs_addressable_scope = false
+    members.each do |name|
+      member = self[name]
+      if Node === member then
+        needs_addressable_scope ||= member.libjit_needs_addressable_scope
+      end
+    end
+    return needs_addressable_scope
   end
 
   class FALSENODE
@@ -486,9 +501,7 @@ class Node
         end
 
         if body then
-          ruby_sourceline = f.ruby_sourceline()
-          n = f.const(JIT::Type::INT, body.nd_line)
-          f.insn_store_relative(ruby_sourceline, 0, n)
+          body.set_source(f)
           result = body.libjit_compile(f, inner_env)
         else
           result = f.const(JIT::Type::OBJECT, nil)
@@ -509,6 +522,8 @@ class Node
   end
 
   class FOR
+    LIBJIT_NEEDS_ADDRESSABLE_SCOPE = true
+
     def libjit_compile(function, env)
       # var - an assignment node that gets executed each time through
       # the loop
@@ -518,17 +533,13 @@ class Node
       # 2. pass this nested function as a parameter to 
 
       return libjit_iterate(function, env, self.var, self.body) do |f|
-        ruby_sourceline = f.ruby_sourceline()
-        n = f.const(JIT::Type::INT, self.iter.nd_line)
-        f.insn_store_relative(ruby_sourceline, 0, n)
-
+        self.iter.set_source(f)
         outer_env_ptr = f.get_param(0)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
         recv = self.iter.libjit_compile(f, inner_env)
         id_each = f.const(JIT::Type::ID, :each)
         zero = f.const(JIT::Type::INT, 0)
-        set_source(function)
         f.insn_call_native(:rb_funcall, 0, recv, id_each, zero)
       end
     end
@@ -541,6 +552,8 @@ class Node
   end
 
   class ITER
+    LIBJIT_NEEDS_ADDRESSABLE_SCOPE = true
+
     def libjit_compile(function, env)
       # var - an assignment node that gets executed each time through
       # the loop
@@ -551,10 +564,7 @@ class Node
 
       # TODO: I think ITER is supposed to get its own scope?
       return libjit_iterate(function, env, self.var, self.body) do |f|
-        ruby_sourceline = f.ruby_sourceline()
-        n = f.const(JIT::Type::INT, self.iter.nd_line)
-        f.insn_store_relative(ruby_sourceline, 0, n)
-
+        self.iter.set_source(f)
         outer_env_ptr = f.get_param(0)
         inner_env = JIT::NodeCompileEnvironment.from_address(
             f, outer_env_ptr, env.scope.local_names, env.optimization_level)
@@ -686,7 +696,6 @@ class Node
         a = a.next
       end
       return hash
-      # pp self
     end
   end
 
@@ -733,6 +742,8 @@ module JIT
     end
 
     def initialize(function, frame=nil)
+      # TODO: we can optimize this; right now accessing self will be
+      # slow, because we have to go through a pointer
       @function = function
       @frame = frame ? frame : function.value(FrameType)
       @frame_ptr = function.insn_address_of(@frame)
@@ -783,6 +794,7 @@ module JIT
     end
 
     def set_addressable(ptr, offset)
+      raise "nil ptr" if ptr.nil?
       @addressable = true
       @ptr = ptr
       @offset = offset
@@ -794,6 +806,27 @@ module JIT
   end
 
   class NodeCompileScope
+    def initialize(function, local_names)
+      @function = function
+
+      @local_names = local_names
+      @locals = {}
+      @local_names.each do |name|
+        @locals[name] = NodeLocalVariable.new(@function, name)
+      end
+    end
+
+    def local_set(vid, value)
+      @locals[vid].set(value)
+      return value
+    end
+
+    def local_get(vid)
+      return @locals[vid].get()
+    end
+  end
+
+  class NodeCompileAddressableScope
     attr_reader :scope_type
     attr_reader :scope
     attr_reader :local_names
@@ -814,6 +847,7 @@ module JIT
     end
 
     def initialize(function, local_names, locals=nil, scope_ptr=nil)
+      # TODO: simplify
       @function = function
 
       @local_names = local_names
@@ -831,10 +865,21 @@ module JIT
         end
       end
 
+      @dynavars = NodeLocalVariable.new(@function, "DYNAVARS")
+
       if scope_ptr then
         @scope_ptr = scope_ptr
-        @dynavars = NodeLocalVariable.new(@function, "DYNAVARS")
-        @dynavars.set_addressable(@scope_ptr, 0)
+      else
+        @dynavars.set(@function.insn_call_native(:rb_hash_new, 0))
+        scope = @function.value(@scope_type)
+        @scope_ptr = @function.insn_address_of(scope)
+      end
+
+      @dynavars.set_addressable(@scope_ptr, 0)
+
+      @local_names.each_with_index do |name, idx|
+        offset = @scope_type.get_offset(idx+1)
+        @locals[name].set_addressable(@scope_ptr, offset) if @locals[name]
       end
     end
 
@@ -871,20 +916,6 @@ module JIT
     end
 
     def address
-      if not defined?(@scope_ptr) then
-        @scope = @function.value(@scope_type)
-        @scope_ptr = @function.insn_address_of(@scope)
-
-        raise "should not happen" if defined?(@dynavars)
-        @dynavars = NodeLocalVariable.new(@function, "DYNAVARS")
-        @dynavars.set_addressable(@scope_ptr, 0)
-        @dynavars.set(@function.insn_call_native(:rb_hash_new, 0))
-
-        @local_names.each_with_index do |name, idx|
-          offset = @scope_type.get_offset(idx+1)
-          @locals[name].set_addressable(@scope_ptr, offset) if @locals[name]
-        end
-      end
       return @scope_ptr
     end
   end
@@ -920,7 +951,7 @@ module JIT
       frame_ptr = function.insn_load_relative(address, 0, JIT::Type::VOID_PTR)
       scope_ptr = function.insn_load_relative(address, 4, JIT::Type::VOID_PTR)
       frame = JIT::NodeCompileFrame.from_address(function, frame_ptr)
-      scope = JIT::NodeCompileScope.from_address(function, scope_ptr, local_names)
+      scope = JIT::NodeCompileAddressableScope.from_address(function, scope_ptr, local_names)
       env = JIT::NodeCompileEnvironment.new(function, optimization_level, frame, scope)
     end
 
@@ -966,7 +997,10 @@ module MethodCompiler
 
         frame = JIT::NodeCompileFrame.new(
             f)
-        scope = JIT::NodeCompileScope.new(
+        scope_type = self.body.libjit_needs_addressable_scope \
+          ? JIT::NodeCompileAddressableScope \
+          : JIT::NodeCompileScope
+        scope = scope_type.new(
             f,
             self.body.tbl || [])
         env = JIT::NodeCompileEnvironment.new(

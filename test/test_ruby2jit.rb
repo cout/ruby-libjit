@@ -71,6 +71,23 @@ class TestRuby2Jit < Test::Unit::TestCase
     end
     compile_and_run(foo.new, :foo)
   end
+
+  def test_block_inside_else
+    foo = Class.new do
+      include Test::Unit::Assertions
+      def foo
+        a = "FOO"
+        assert_equal("FOO", a)
+        if true then
+          assert_equal("FOO", a)
+        else
+          [].each { false }
+        end
+        assert_equal("FOO", a)
+      end
+    end
+    compile_and_run(foo.new, :foo)
+  end
 end
 
 if __FILE__ == $0 then
