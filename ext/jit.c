@@ -479,8 +479,6 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
     }
   }
 
-  /* TODO: don't assume that all functions return int */
-
   {
     jit_type_t return_type = jit_type_get_return(signature);
     int return_kind = jit_type_get_kind(return_type);
