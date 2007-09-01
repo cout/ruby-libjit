@@ -224,6 +224,17 @@ static VALUE function_s_new(int argc, VALUE * argv, VALUE klass)
   return create_function(argc, argv, klass);
 }
 
+static VALUE function_abandon_if_exception(VALUE function_v)
+{
+  if(ruby_errinfo)
+  {
+    jit_function_t function;
+    Data_Get_Struct(function_v, struct _jit_function, function);
+    jit_function_abandon(function);
+  }
+  return Qnil;
+}
+
 /*
  * call-seq:
  *   function = Function.new(context, signature, [parent]) { |function| ... }
@@ -233,11 +244,14 @@ static VALUE function_s_new(int argc, VALUE * argv, VALUE klass)
  */
 static VALUE function_s_compile(int argc, VALUE * argv, VALUE klass)
 {
-  /* TODO: call jit_function_abandon if an exception occurs during
-   * compilation */
   VALUE function = create_function(argc, argv, klass);
   rb_yield(function);
   function_compile(function);
+  rb_ensure(
+      function_compile,
+      function,
+      function_abandon_if_exception,
+      function);
   return function;
 }
 
