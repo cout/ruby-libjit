@@ -326,26 +326,41 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
 
   VALUE name_v;
   VALUE args_v;
-  VALUE flags_v = Qnil;
+  VALUE function_pointer_v;
+  VALUE signature_v;
+  VALUE flags_v;
 
   char const * name;
   jit_value_t * args;
   jit_value_t retval;
+  void * function_pointer;
+  jit_type_t signature;
   int flags;
   size_t num_args;
 
   int j;
 
-  jit_type_t signature;
-  void * native_func = 0;
-
-  rb_scan_args(argc, argv, "2*", &name_v, &flags_v, &args_v);
+  rb_scan_args(argc, argv, "4*", &name_v, &function_pointer_v, &signature_v, &flags_v, &args_v);
 
   Data_Get_Struct(self, struct _jit_function, function);
   name = rb_id2name(SYM2ID(name_v));
 
+  function_pointer = (void *)NUM2ULONG(function_pointer_v);
+
+  Data_Get_Struct(signature_v, struct _jit_type, signature);
+
   num_args = RARRAY(args_v)->len;
   args = ALLOCA_N(jit_value_t, num_args);
+
+  if(num_args != jit_type_num_params(signature))
+  {
+    rb_raise(
+        rb_eArgError,
+        "Wrong number of arguments passed for %s (expecting %d but got %d)", 
+        name,
+        jit_type_num_params(signature),
+        num_args);
+  }
 
   /* Iterate over all the arguments and unwrap them one by one */
   for(j = 0; j < num_args; ++j)
@@ -360,256 +375,8 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   }
   flags = NUM2INT(flags_v);
 
-  if(SYM2ID(name_v) == rb_intern("rb_funcall"))
-  {
-    /* TODO: what to do about exceptions? */
-    /* TODO: validate num args? */
-
-    VALUE sprintf_args[] = {
-        rb_str_new2("%s(%s)"),
-        name_v,
-        ID2SYM(jit_value_get_nint_constant(args[1])),
-    };
-    name_v = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
-    name = STR2CSTR(name_v);
-
-    native_func = (void *)rb_funcall;
-
-    jit_type_t * param_types = ALLOCA_N(jit_type_t, num_args);
-    param_types[0] = jit_type_VALUE;
-    param_types[1] = jit_type_ID;
-    param_types[2] = jit_type_int;
-
-    for(j = 0; j < num_args; ++j)
-    {
-      param_types[j] = jit_type_VALUE;
-    }
-
-    signature = jit_type_create_signature(
-        jit_abi_cdecl, /* TODO: vararg? */
-        jit_type_VALUE,
-        param_types,
-        num_args,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_funcall2"))
-  {
-    /* TODO: what to do about exceptions? */
-    /* TODO: validate num args? */
-
-    VALUE sprintf_args[] = {
-        rb_str_new2("%s(%s)"),
-        name_v,
-        ID2SYM(jit_value_get_nint_constant(args[1])),
-    };
-
-    name_v = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
-    name = STR2CSTR(name_v);
-    native_func = (void *)rb_funcall2;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID, jit_type_int, jit_type_void_ptr };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl, /* TODO: vararg? */
-        jit_type_VALUE,
-        param_types,
-        num_args,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_funcall3"))
-  {
-    /* TODO: what to do about exceptions? */
-    /* TODO: validate num args? */
-
-    VALUE sprintf_args[] = {
-        rb_str_new2("%s(%s)"),
-        name_v,
-        ID2SYM(jit_value_get_nint_constant(args[1])),
-    };
-
-    name_v = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
-    name = STR2CSTR(name_v);
-    native_func = (void *)rb_funcall3;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID, jit_type_int, jit_type_void_ptr };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl, /* TODO: vararg? */
-        jit_type_VALUE,
-        param_types,
-        num_args,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_iterate"))
-  {
-    native_func = (void *)rb_iterate;
-    jit_type_t param_types[] = { jit_type_void_ptr, jit_type_void_ptr, jit_type_void_ptr, jit_type_void_ptr };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        4,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_const_get"))
-  {
-    native_func = (void *)rb_const_get;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        2,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_class_of"))
-  {
-    native_func = (void *)rb_class_of;
-    jit_type_t param_types[] = { jit_type_VALUE };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        1,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_str_dup"))
-  {
-    native_func = (void *)rb_str_dup;
-    jit_type_t param_types[] = { jit_type_VALUE };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        1,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_str_concat"))
-  {
-    native_func = (void *)rb_str_concat;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        2,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_range_new"))
-  {
-    native_func = (void *)rb_range_new;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE, jit_type_int };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        3,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_ary_new2"))
-  {
-    native_func = (void *)rb_ary_new2;
-    jit_type_t param_types[] = { jit_type_int };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        1,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_ary_store"))
-  {
-    native_func = (void *)rb_ary_store;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_int, jit_type_VALUE };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        3,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_ary_entry"))
-  {
-    native_func = (void *)rb_ary_entry;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_int };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        2,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_ary_to_ary"))
-  {
-    native_func = (void *)rb_ary_to_ary;
-    jit_type_t param_types[] = { jit_type_VALUE };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        1,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_hash_new"))
-  {
-    native_func = (void *)rb_hash_new;
-    jit_type_t param_types[] = { };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        0,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_hash_aset"))
-  {
-    native_func = (void *)rb_hash_aset;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE, jit_type_VALUE };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        3,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_hash_aref"))
-  {
-    native_func = (void *)rb_hash_aref;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        2,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_uint2inum"))
-  {
-    native_func = (void *)rb_uint2inum;
-    jit_type_t param_types[] = { jit_type_uint };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        1,
-        1);
-  }
-  else if(SYM2ID(name_v) == rb_intern("rb_ivar_get"))
-  {
-    native_func = (void *)rb_ivar_get;
-    jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID };
-    signature = jit_type_create_signature(
-        jit_abi_cdecl,
-        jit_type_VALUE,
-        param_types,
-        2,
-        1);
-  }
-  else
-  {
-    rb_raise(rb_eArgError, "Invalid native function %s", name);
-  }
-
-  /* TODO: the signature could be leaked if this function raises an
-   * exception */
   retval = jit_insn_call_native(
-      function, name, native_func, signature, args, RARRAY(args_v)->len, flags);
+      function, name, function_pointer, signature, args, num_args, flags);
   return Data_Wrap_Struct(rb_cValue, 0, 0, retval);
 }
 
