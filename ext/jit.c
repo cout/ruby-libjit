@@ -438,7 +438,10 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
     int f_argc = argc - 1;
     VALUE f_self = *(VALUE *)argv;
     VALUE * f_argv = ((VALUE *)argv) + 1;
-    void * f_args[3] = { &f_argc, &f_argv, &f_self };
+    void * f_args[3];
+    f_args[0] = &f_argc;
+    f_args[1] = &f_argv;
+    f_args[2] = &f_self;
     jit_function_apply(function, f_args, &result);
     return result;
   }
@@ -528,9 +531,9 @@ static VALUE function_value(VALUE self, VALUE type_v)
   check_type("type", rb_cType, type_v);
   Data_Get_Struct(type_v, struct _jit_type, type);
 
-  // TODO: When we wrap a value, we should inject a reference to the
-  // function in the object, so the function stays around as long as the
-  // value does
+  /* TODO: When we wrap a value, we should inject a reference to the
+   * function in the object, so the function stays around as long as the
+   * value does */
   value = jit_value_create(function, type);
   return Data_Wrap_Struct(rb_cValue, 0, 0, value);
 }
@@ -546,15 +549,15 @@ static VALUE function_const(VALUE self, VALUE type_v, VALUE constant)
   jit_function_t function;
   jit_type_t type;
   jit_value_t value;
+  jit_constant_t c;
+  int kind;
 
   Data_Get_Struct(self, struct _jit_function, function);
 
   check_type("type", rb_cType, type_v);
   Data_Get_Struct(type_v, struct _jit_type, type);
 
-  jit_constant_t c;
-
-  int kind = jit_type_get_kind(type);
+  kind = jit_type_get_kind(type);
   switch(kind)
   {
     case JIT_TYPE_INT:
@@ -666,8 +669,9 @@ static VALUE function_dump(VALUE self)
 static VALUE function_to_closure(VALUE self)
 {
   jit_function_t function;
+  void * closure;
   Data_Get_Struct(self, struct _jit_function, function);
-  void * closure = jit_function_to_closure(function);
+  closure = jit_function_to_closure(function);
   rb_ary_push(libjit_closure_functions, self);
   return ULONG2NUM((unsigned long)closure);
 }
@@ -823,16 +827,15 @@ static VALUE value_inspect(VALUE self)
   jit_value_t value;
   jit_type_t type;
   char * cname = rb_obj_classname(self);
+  VALUE args[6];
   Data_Get_Struct(self, struct _jit_value, value);
   type = jit_value_get_type(value);
-  VALUE args[] = {
-      rb_str_new2("<%s:0x%x %s ptr=0x%x type=0x%x>"),
-      rb_str_new2(cname),
-      ULONG2NUM(self),
-      value_to_s(self),
-      ULONG2NUM((VALUE)value),
-      ULONG2NUM((VALUE)type),
-  };
+  args[0] = rb_str_new2("<%s:0x%x %s ptr=0x%x type=0x%x>");
+  args[1] = rb_str_new2(cname);
+  args[2] = ULONG2NUM(self);
+  args[3] = value_to_s(self);
+  args[4] = ULONG2NUM((VALUE)value);
+  args[5] = ULONG2NUM((VALUE)type);
   return rb_f_sprintf(sizeof(args)/sizeof(args[0]), args);
 }
 
@@ -1004,6 +1007,7 @@ static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE functi
   jit_type_t signature;
   int signature_tag;
   int arity;
+  void (*closure)();
 
   Data_Get_Struct(function_v, struct _jit_function, function);
 
@@ -1018,9 +1022,9 @@ static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE functi
     arity = jit_type_num_params(signature) - 1;
   }
 
-  void * closure = jit_function_to_closure(function);
+  closure = jit_function_to_closure(function);
   rb_ary_push(libjit_closure_functions, function_v);
-  rb_define_method(klass, name, closure, arity);
+  rb_define_method(klass, name, RUBY_METHOD_FUNC(closure), arity);
   return Qnil;
 }
 
@@ -1087,8 +1091,12 @@ void Init_jit()
   rb_define_const(rb_cType, "ID", wrap_type(jit_type_ID));
 
   {
-    jit_type_t ruby_vararg_param_types[] = { jit_type_int, jit_type_void_ptr, jit_type_VALUE };
-    jit_type_t ruby_vararg_signature_untagged = jit_type_create_signature(
+    jit_type_t ruby_vararg_param_types[3];
+    jit_type_t ruby_vararg_signature_untagged;
+    ruby_vararg_param_types[0] = jit_type_int;
+    ruby_vararg_param_types[1] = jit_type_void_ptr;
+    ruby_vararg_param_types[2] = jit_type_VALUE;
+    ruby_vararg_signature_untagged = jit_type_create_signature(
           jit_abi_cdecl,
           jit_type_VALUE,
           ruby_vararg_param_types,

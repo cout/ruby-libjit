@@ -17,7 +17,11 @@ generated_files.each do |f|
 end
 srcs.uniq!
 $objs = srcs.map { |f| f.sub(/\.c$/, ".#{$OBJEXT}") }
-$CFLAGS << ' -Wall -g'
+
+if Config::CONFIG['CC'] == 'gcc' then
+  # $CFLAGS << ' -Wall -g -pedantic -Wno-long-long'
+  $CFLAGS << ' -Wall -g'
+end
 
 create_makefile("jit")
 
