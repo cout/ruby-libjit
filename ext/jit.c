@@ -617,7 +617,15 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
  * call-seq:
  *   function.apply(arg1 [, arg2 [, ... ]])
  *
- * Call a compiled function.
+ * Call a compiled function.  Each argument passed in will be converted
+ * to the type specified by the function's signature.
+ *
+ * If the function's signature is Type::RUBY_VARARG_SIGNATURE, then the
+ * arguments will be passed in the the first parameter the count of the
+ * number of arguments, the second parameter a pointer to an array
+ * containing the second through the last argument, and the third
+ * parameter the explicit self (that is, the first argument passed to
+ * apply).
  */
 static VALUE function_apply(int argc, VALUE * argv, VALUE self)
 {
@@ -1198,18 +1206,39 @@ static VALUE label_s_new(VALUE klass)
 
 /*
  * call-seq:
- *   module.define_libjit_method(name, function, arity)
+ *   module.define_libjit_method(name, function)
  *
- * Use a Function to define an instance method on a module.
+ * Use a Function to define an instance method on a module.  The
+ * function should have one of two signatures:
+ *
+ * * The first parameter to the function should be an OBJECT that
+ *   represents the self parameter and the rest of the parameters, or
+ *
+ * * The function's signature should be Type::RUBY_VARARG_SIGNATURE.
  */
-static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE function_v, VALUE arity_v)
+static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE function_v)
 {
   /* TODO: I think that by using a closure here, we have a memory leak
    * if the method is ever redefined. */
   char const * name = STR2CSTR(name_v);
   jit_function_t function;
+  jit_type_t signature;
+  int signature_tag;
+  int arity;
+
   Data_Get_Struct(function_v, struct _jit_function, function);
-  int arity = NUM2INT(arity_v); /* TODO: validate */
+
+  signature = jit_function_get_signature(function);
+  signature_tag = (int)jit_function_get_meta(function, RJT_TAG_FOR_SIGNATURE);
+  if(signature_tag == JIT_TYPE_FIRST_TAGGED + RJT_RUBY_VARARG_SIGNATURE)
+  {
+    arity = -1;
+  }
+  else
+  {
+    arity = jit_type_num_params(signature) - 1;
+  }
+
   void * closure = jit_function_to_closure(function);
   rb_ary_push(libjit_closure_functions, function_v);
   rb_define_method(klass, name, closure, arity);
@@ -1318,7 +1347,7 @@ void Init_jit()
   rb_define_const(rb_mCall, "TAIL", INT2NUM(JIT_CALL_TAIL));
 
   /* VALUE rb_cModule = rb_define_module(); */
-  rb_define_method(rb_cModule, "define_libjit_method", module_define_libjit_method, 3);
+  rb_define_method(rb_cModule, "define_libjit_method", module_define_libjit_method, 2);
 
   libjit_closure_functions = rb_ary_new();
   rb_gc_register_address(&libjit_closure_functions);
