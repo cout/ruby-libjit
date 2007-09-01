@@ -74,6 +74,9 @@ end
 
 def write_insn(name, retval_type, arg_types)
   num_args = arg_types.length
+  an = [?a, ?e, ?i, ?o, ?u].include?(name[0])
+  puts "/* Generate a#{an} #{name} instruction (see the libjit documentation for more"
+  puts " * details. */"
   puts "static VALUE function_insn_#{name}(VALUE self, #{incoming_args(arg_types)})"
   puts "{"
   puts "  jit_function_t function;"

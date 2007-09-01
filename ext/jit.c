@@ -1,11 +1,11 @@
 #define _GNU_SOURCE
-#include "stdio.h"
+#include <stdio.h>
 
-#include "jit/jit.h"
-#include "jit/jit-dump.h"
-#include "ruby.h"
+#include <jit/jit.h>
+#include <jit/jit-dump.h>
+#include <ruby.h>
 
-#include "node.h" // TODO
+#include "rubyjit.h"
 
 static VALUE rb_mJIT;
 static VALUE rb_cContext;
@@ -18,8 +18,6 @@ static VALUE rb_mCall;
 
 static jit_type_t jit_type_VALUE;
 static jit_type_t jit_type_ID;
-static jit_type_t jit_type_CSTRING;
-static jit_type_t jit_type_CLONG;
 
 static jit_type_t ruby_vararg_signature;
 
@@ -37,26 +35,6 @@ typedef jit_uint jit_VALUE;
 typedef jit_uint jit_ID;
 #define jit_underlying_type_ID jit_type_uint
 #define SET_CONSTANT_ID(c, v) c.un.uint_value = v;
-#define jit_underlying_type_CLONG jit_type_int
-
-/* TODO: Need better (more consistent) names for these */
-enum User_Defined_Tag
-{
-  OBJECT_TAG,
-  ID_TAG,
-  CSTRING_TAG,
-  CLONG_TAG,
-  RUBY_VARARG_SIGNATURE_TAG,
-};
-
-/* TODO: Need better (more consistent) names for these */
-enum Meta_Tag
-{
-  VALUE_OBJECTS,
-  FUNCTIONS,
-  CONTEXT,
-  TAG_FOR_SIGNATURE,
-};
 
 static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 {
@@ -71,6 +49,14 @@ static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
   }
 }
 
+void raise_memory_error_if_zero(void * v)
+{
+  if(!v)
+  {
+    rb_raise(rb_eNoMemError, "Out of memory");
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Context
  * ---------------------------------------------------------------------------
@@ -78,17 +64,27 @@ static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 
 static void context_mark(jit_context_t context)
 {
-  VALUE functions = (VALUE)jit_context_get_meta(context, FUNCTIONS);
+  VALUE functions = (VALUE)jit_context_get_meta(context, RJT_FUNCTIONS);
   rb_gc_mark(functions);
 }
 
+/* Create a new context.
+ *
+ * call-seq:
+ *   context = Context.new
+ */
 static VALUE context_s_new(VALUE klass)
 {
   jit_context_t context = jit_context_create();
-  jit_context_set_meta(context, FUNCTIONS, (void*)rb_ary_new(), 0);
+  jit_context_set_meta(context, RJT_FUNCTIONS, (void*)rb_ary_new(), 0);
   return Data_Wrap_Struct(rb_cContext, context_mark, jit_context_destroy, context);
 }
 
+/* Acquire a lock on the context so it can be used to build a function.
+ *
+ * call-seq:
+ *   context.build { ... }
+ */
 static VALUE context_build(VALUE self)
 {
   jit_context_t context;
@@ -97,6 +93,12 @@ static VALUE context_build(VALUE self)
   return rb_ensure(rb_yield, self, RUBY_METHOD_FUNC(jit_context_build_end), (VALUE)context);
 }
 
+/* Create a context and acquire a lock on it, then yield the context to
+ * the block.
+ *
+ * call-seq:
+ *   Context.build { |context| ... }
+ */
 static VALUE context_s_build(VALUE klass)
 {
   return context_build(context_s_new(klass));
@@ -109,8 +111,8 @@ static VALUE context_s_build(VALUE klass)
 
 static void mark_function(jit_function_t function)
 {
-  rb_gc_mark((VALUE)jit_function_get_meta(function, VALUE_OBJECTS));
-  rb_gc_mark((VALUE)jit_function_get_meta(function, CONTEXT));
+  rb_gc_mark((VALUE)jit_function_get_meta(function, RJT_VALUE_OBJECTS));
+  rb_gc_mark((VALUE)jit_function_get_meta(function, RJT_CONTEXT));
 }
 
 static VALUE create_function(int argc, VALUE * argv, VALUE klass)
@@ -150,30 +152,35 @@ static VALUE create_function(int argc, VALUE * argv, VALUE klass)
   }
 
   /* Make sure the function is around as long as the context is */
-  if(!jit_function_set_meta(function, VALUE_OBJECTS, (void *)rb_ary_new(), 0, 0))
+  if(!jit_function_set_meta(function, RJT_VALUE_OBJECTS, (void *)rb_ary_new(), 0, 0))
   {
     rb_raise(rb_eNoMemError, "Out of memory");
   }
 
   /* Remember the signature's tag for later */
-  if(!jit_function_set_meta(function, TAG_FOR_SIGNATURE, (void *)signature_tag, 0, 0))
+  if(!jit_function_set_meta(function, RJT_TAG_FOR_SIGNATURE, (void *)signature_tag, 0, 0))
   {
     rb_raise(rb_eNoMemError, "Out of memory");
   }
 
-  if(!jit_function_set_meta(function, CONTEXT, (void *)context, 0, 0))
+  if(!jit_function_set_meta(function, RJT_CONTEXT, (void *)context, 0, 0))
   {
     rb_raise(rb_eNoMemError, "Out of memory");
   }
 
   function_obj = Data_Wrap_Struct(rb_cFunction, mark_function, 0, function);
 
-  functions = (VALUE)jit_context_get_meta(jit_context, FUNCTIONS);
+  functions = (VALUE)jit_context_get_meta(jit_context, RJT_FUNCTIONS);
   rb_ary_push(functions, function_obj);
 
   return function_obj;
 }
 
+/* Begin compiling a function.
+ *
+ * call-seq:
+ *   function.compile()
+ */
 static VALUE function_compile(VALUE self)
 {
   jit_function_t function;
@@ -185,6 +192,11 @@ static VALUE function_compile(VALUE self)
   return self;
 }
 
+/* Create a new function.
+ *
+ * call-seq:
+ *   function = Function.new(context, signature, [parent])
+ */
 static VALUE function_s_new(int argc, VALUE * argv, VALUE klass)
 {
   if(rb_block_given_p())
@@ -195,27 +207,44 @@ static VALUE function_s_new(int argc, VALUE * argv, VALUE klass)
   return create_function(argc, argv, klass);
 }
 
-/* TODO: call jit_function_abandon if an exception occurs during
- * compilation */
+/* Create a new function, begin compiling it, and pass the function to
+ * the block.
+ *
+ * call-seq:
+ *   function = Function.new(context, signature, [parent]) { |function| ... }
+ */
 static VALUE function_s_compile(int argc, VALUE * argv, VALUE klass)
 {
+  /* TODO: call jit_function_abandon if an exception occurs during
+   * compilation */
   VALUE function = create_function(argc, argv, klass);
   rb_yield(function);
   function_compile(function);
   return function;
 }
 
+/* Get the value that corresponds to a specified function parameter.
+ *
+ * call-seq:
+ *   value = function.get_param(index)
+ */
 static VALUE function_get_param(VALUE self, VALUE idx)
 {
   jit_function_t function;
   jit_value_t v;
   Data_Get_Struct(self, struct _jit_function, function);
   v = jit_value_get_param(function, NUM2INT(idx));
+  raise_memory_error_if_zero(v);
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
 }
 
 #include "insns.inc"
 
+/* Generate an instruction to call the specified function.
+ *
+ * call-seq:
+ *   value = function.call(name, called_function, flags, [arg1 [, ... ]])
+ */
 static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
 {
   jit_function_t function;
@@ -258,6 +287,11 @@ static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
   return Data_Wrap_Struct(rb_cValue, 0, 0, retval);
 }
 
+/* Generate an instruction to call a native function.
+ *
+ * call-seq:
+ *   value = function.call(name, flags, [arg1 [, ... ]])
+ */
 static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
 {
   jit_function_t function;
@@ -548,6 +582,11 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   return Data_Wrap_Struct(rb_cValue, 0, 0, retval);
 }
 
+/* Call a compiled function.
+ *
+ * call-seq:
+ *   function.apply(arg1 [, arg2 [, ... ]])
+ */
 static VALUE function_apply(int argc, VALUE * argv, VALUE self)
 {
   jit_function_t function;
@@ -569,8 +608,8 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   arg_data = (char *)ALLOCA_N(char, 8 * n);
 
   {
-    int signature_tag = (int)jit_function_get_meta(function, TAG_FOR_SIGNATURE);
-    if(signature_tag == JIT_TYPE_FIRST_TAGGED + RUBY_VARARG_SIGNATURE_TAG)
+    int signature_tag = (int)jit_function_get_meta(function, RJT_TAG_FOR_SIGNATURE);
+    if(signature_tag == JIT_TYPE_FIRST_TAGGED + RJT_RUBY_VARARG_SIGNATURE)
     {
       /* TODO: validate the number of args passed in (should be at least
        * 1) */
@@ -599,7 +638,7 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         break;
       }
 
-      case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
+      case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
       {
         *(VALUE *)arg_data = argv[j];
         args[j] = (VALUE *)arg_data;
@@ -607,7 +646,7 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         break;
       }
 
-      case JIT_TYPE_FIRST_TAGGED + ID_TAG:
+      case JIT_TYPE_FIRST_TAGGED + RJT_ID:
       {
         *(ID *)arg_data = SYM2ID(argv[j]);
         args[j] = (ID *)arg_data;
@@ -634,14 +673,14 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         return INT2NUM(result);
       }
 
-      case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
+      case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
       {
         jit_uint result;
         jit_function_apply(function, args, &result);
         return result;
       }
 
-      case JIT_TYPE_FIRST_TAGGED + ID_TAG:
+      case JIT_TYPE_FIRST_TAGGED + RJT_ID:
       {
         jit_uint result;
         jit_function_apply(function, args, &result);
@@ -654,8 +693,10 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   }
 }
 
-/* If passed one value, create a value with jit_value_create.
- * If passed two values, create a constant with the given value.
+/* Create a value (placeholder/variable) with the given type.
+ *
+ * call-seq:
+ *   value = function.value(type)
  */
 static VALUE function_value(VALUE self, VALUE type)
 {
@@ -675,6 +716,11 @@ static VALUE function_value(VALUE self, VALUE type)
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
 }
 
+/* Create a constant value with the given type.
+ *
+ * call-seq:
+ *   value = function.const(type, constant_value)
+ */
 static VALUE function_const(VALUE self, VALUE type, VALUE constant)
 {
   jit_function_t function;
@@ -705,9 +751,9 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
       break;
     }
 
-    case JIT_TYPE_FIRST_TAGGED + OBJECT_TAG:
+    case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
     {
-      VALUE value_objects = (VALUE)jit_function_get_meta(function, VALUE_OBJECTS);
+      VALUE value_objects = (VALUE)jit_function_get_meta(function, RJT_VALUE_OBJECTS);
 
       c.type = j_type;
       SET_CONSTANT_VALUE(c, constant);
@@ -719,24 +765,10 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
       break;
     }
 
-    case JIT_TYPE_FIRST_TAGGED + ID_TAG:
+    case JIT_TYPE_FIRST_TAGGED + RJT_ID:
     {
       c.type = j_type;
       SET_CONSTANT_ID(c, SYM2ID(constant));
-      break;
-    }
-
-    case JIT_TYPE_FIRST_TAGGED + CSTRING_TAG:
-    {
-      VALUE value_objects = (VALUE)jit_function_get_meta(function, VALUE_OBJECTS);
-
-      c.type = j_type;
-      c.un.ptr_value = STR2CSTR(constant);
-
-      /* Make sure the object gets marked as long as the function is
-       * around */
-      /* TODO: not exception-safe */
-      rb_ary_push(value_objects, constant);
       break;
     }
 
@@ -748,75 +780,11 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
   return Data_Wrap_Struct(rb_cValue, 0, 0, v);
 }
 
-/*
-static VALUE function_ruby_sourceline(VALUE self)
-{
-  jit_type_t ptr_type = jit_type_create_pointer(jit_type_int, 1);
-  jit_constant_t c;
-  jit_value_t v;
-  jit_function_t function;
-
-  Data_Get_Struct(self, struct _jit_function, function);
-  c.type = ptr_type;
-  c.un.ptr_value = &ruby_sourceline;
-  v = jit_value_create_constant(function, &c);
-
-  return Data_Wrap_Struct(rb_cValue, 0, 0, v);
-}
-
-static VALUE function_ruby_sourcefile(VALUE self)
-{
-  jit_type_t ptr_type = jit_type_create_pointer(jit_type_int, 1);
-  jit_constant_t c;
-  jit_value_t v;
-  jit_function_t function;
-
-  Data_Get_Struct(self, struct _jit_function, function);
-  c.type = ptr_type;
-  c.un.ptr_value = &ruby_sourcefile;
-  v = jit_value_create_constant(function, &c);
-
-  return Data_Wrap_Struct(rb_cValue, 0, 0, v);
-}
-*/
-
-// TODO: move this to a different file
-static VALUE function_set_ruby_source(VALUE self, VALUE node)
-{
-  NODE * n;
-  jit_function_t function;
-
-  Data_Get_Struct(self, struct _jit_function, function);
-  Data_Get_Struct(node, NODE, n); // TODO: type check
-
-  VALUE value_objects = (VALUE)jit_function_get_meta(function, VALUE_OBJECTS);
-
-  jit_constant_t c;
-
-  c.type = jit_type_int;
-  c.un.int_value = nd_line(n);
-  jit_value_t line = jit_value_create_constant(function, &c);
-
-  c.type = jit_type_void_ptr;
-  c.un.ptr_value = n->nd_file;
-  jit_value_t file = jit_value_create_constant(function, &c);
-
-  c.type = jit_type_void_ptr;
-  c.un.ptr_value = &ruby_sourceline;
-  jit_value_t ruby_sourceline_ptr = jit_value_create_constant(function, &c);
-
-  c.type = jit_type_void_ptr;
-  c.un.ptr_value = &ruby_sourcefile;
-  jit_value_t ruby_sourcefile_ptr = jit_value_create_constant(function, &c);
-
-  jit_insn_store_relative(function, ruby_sourceline_ptr, 0, line);
-  jit_insn_store_relative(function, ruby_sourcefile_ptr, 0, file);
-
-  rb_ary_push(value_objects, node);
-
-  return Qnil;
-}
-
+/* Get the optimization level for a function.
+ *
+ * call-seq:
+ *   level = function.optimization_level()
+ */
 static VALUE function_optimization_level(VALUE self)
 {
   jit_function_t function;
@@ -824,6 +792,11 @@ static VALUE function_optimization_level(VALUE self)
   return INT2NUM(jit_function_get_optimization_level(function));
 }
 
+/* Set the optimization level for a function.
+ *
+ * call-seq:
+ *   function.optimization_level = level
+ */
 static VALUE function_set_optimization_level(VALUE self, VALUE level)
 {
   jit_function_t function;
@@ -832,12 +805,23 @@ static VALUE function_set_optimization_level(VALUE self, VALUE level)
   return level;
 }
 
+/* Get the maximum optimization level (which should be the same for any
+ * function).
+ *
+ * call-seq:
+ *   level = function.max_optimization_level()
+ */
 static VALUE function_max_optimization_level(VALUE klass)
 {
   return INT2NUM(jit_function_get_max_optimization_level());
 }
 
-static VALUE function_to_s(VALUE self)
+/* Dump the instructions in a function to a string.
+ *
+ * call-seq:
+ *   str = function.dump()
+ */
+static VALUE function_dump(VALUE self)
 {
   jit_function_t function;
   char buf[16*1024]; /* TODO: big enough? */
@@ -848,6 +832,12 @@ static VALUE function_to_s(VALUE self)
   return rb_str_new2(buf);
 }
 
+/* Return a pointer to a closure for a function.  This pointer can be
+ * passed into other functions as a function pointer.
+ *
+ * call-seq:
+ *   ptr = function.to_closure()
+ */
 static VALUE function_to_closure(VALUE self)
 {
   jit_function_t function;
@@ -857,42 +847,28 @@ static VALUE function_to_closure(VALUE self)
   return ULONG2NUM((unsigned long)closure);
 }
 
+/* Get a function's context.
+ *
+ * call-seq:
+ *   context = function.context()
+ */
 static VALUE function_get_context(VALUE self)
 {
   jit_function_t function;
   Data_Get_Struct(self, struct _jit_function, function);
-  return (VALUE)jit_function_get_meta(function, CONTEXT);
+  return (VALUE)jit_function_get_meta(function, RJT_CONTEXT);
 }
 
+/* Determine whether a function is compiled.
+ *
+ * call-seq:
+ *   is_compiled = function.compiled?
+ */
 static VALUE function_is_compiled(VALUE self)
 {
   jit_function_t function;
   Data_Get_Struct(self, struct _jit_function, function);
   return jit_function_is_compiled(function) ? Qtrue : Qfalse;
-}
-
-// TODO: Provide offsetof functions for all the basic types (and make
-// this function go away)
-static VALUE function_ruby_array_length(VALUE self, VALUE array)
-{
-  jit_function_t function;
-  Data_Get_Struct(self, struct _jit_function, function);
-  jit_value_t j_array;
-  Data_Get_Struct(array, struct _jit_value, j_array);
-  jit_value_t length = jit_insn_load_relative(
-      function, j_array, offsetof(struct RArray, len), jit_type_CLONG);
-  return Data_Wrap_Struct(rb_cValue, 0, 0, length);
-}
-
-static VALUE function_ruby_array_ptr(VALUE self, VALUE array)
-{
-  jit_function_t function;
-  Data_Get_Struct(self, struct _jit_function, function);
-  jit_value_t j_array;
-  Data_Get_Struct(array, struct _jit_value, j_array);
-  jit_value_t length = jit_insn_load_relative(
-      function, j_array, offsetof(struct RArray, ptr), jit_type_void_ptr);
-  return Data_Wrap_Struct(rb_cValue, 0, 0, length);
 }
 
 /* ---------------------------------------------------------------------------
@@ -908,6 +884,11 @@ static VALUE wrap_type(jit_type_t type)
   return Data_Wrap_Struct(rb_cType, 0, jit_type_free, type);
 }
 
+/* Create a new signature.
+ *
+ * call-seq:
+ *   type = Type.create_signature(abi, return_type, array_of_param_types)
+ */
 static VALUE type_s_create_signature(
     VALUE klass, VALUE abi, VALUE return_type, VALUE params)
 {
@@ -936,6 +917,11 @@ static VALUE type_s_create_signature(
   return wrap_type(signature);
 }
 
+/* Create a new struct type.
+ *
+ * call-seq:
+ *   type = Type.create_struct(array_of_field_types)
+ */
 static VALUE type_s_create_struct(
     VALUE klass, VALUE fields)
 {
@@ -958,6 +944,11 @@ static VALUE type_s_create_struct(
   return wrap_type(j_struct);
 }
 
+/* Get the offset of the nth field in a struct.
+ *
+ * call-seq:
+ *   offset = struct_type.get_offset(index)
+ */
 static VALUE type_get_offset(VALUE self, VALUE field_index)
 {
   int j_field_index = NUM2INT(field_index);
@@ -971,6 +962,11 @@ static VALUE type_get_offset(VALUE self, VALUE field_index)
  * ---------------------------------------------------------------------------
  */
 
+/* Return a string representation of the value.
+ *
+ * call-seq:
+ *   str = value.to_s
+ */
 static VALUE value_to_s(VALUE self)
 {
   /* TODO: We shouldn't depend on glibc */
@@ -985,6 +981,12 @@ static VALUE value_to_s(VALUE self)
   return rb_str_new2(buf);
 }
 
+/* Return a string representation of a value with additional
+ * information about the value.
+ *
+ * call-seq:
+ *   str = value.inspect
+ */
 static VALUE value_inspect(VALUE self)
 {
   jit_value_t value;
@@ -1003,6 +1005,11 @@ static VALUE value_inspect(VALUE self)
   return rb_f_sprintf(sizeof(args)/sizeof(args[0]), args);
 }
 
+/* Determine if a value is valid (non-zero).
+ *
+ * call-seq:
+ *   is_valid = value.valid?
+ */
 static VALUE value_is_valid(VALUE self)
 {
   jit_value_t value;
@@ -1010,6 +1017,11 @@ static VALUE value_is_valid(VALUE self)
   return value != 0;
 }
 
+/* Determine if a value represents a temporary.
+ *
+ * call-seq:
+ *   is_temporary = value.temporary?
+ */
 static VALUE value_is_temporary(VALUE self)
 {
   jit_value_t value;
@@ -1017,6 +1029,11 @@ static VALUE value_is_temporary(VALUE self)
   return jit_value_is_temporary(value) ? Qtrue : Qfalse;
 }
 
+/* Determine if a value represents a local.
+ *
+ * call-seq:
+ *   is_local = value.local?
+ */
 static VALUE value_is_local(VALUE self)
 {
   jit_value_t value;
@@ -1024,6 +1041,11 @@ static VALUE value_is_local(VALUE self)
   return jit_value_is_local(value) ? Qtrue : Qfalse;
 }
 
+/* Determine if a value represents a constant.
+ *
+ * call-seq:
+ *   is_local = value.constant?
+ */
 static VALUE value_is_constant(VALUE self)
 {
   jit_value_t value;
@@ -1031,6 +1053,12 @@ static VALUE value_is_constant(VALUE self)
   return jit_value_is_constant(value) ? Qtrue : Qfalse;
 }
 
+/* Determine if a value is volatile (that is, the contents must be
+ * reloaded from memory each time it is used).
+ *
+ * call-seq:
+ *   is_volatile = value.volatile?
+ */
 static VALUE value_is_volatile(VALUE self)
 {
   jit_value_t value;
@@ -1038,6 +1066,12 @@ static VALUE value_is_volatile(VALUE self)
   return jit_value_is_volatile(value) ? Qtrue : Qfalse;
 }
 
+/* Make a value volatile (that is, ensure that its contents are reloaded
+ * from memory each time it is used).
+ *
+ * call-seq:
+ *   value.volatile = is_volatile
+ */
 static VALUE value_set_volatile(VALUE self)
 {
   jit_value_t value;
@@ -1046,6 +1080,11 @@ static VALUE value_set_volatile(VALUE self)
   return Qnil;
 }
 
+/* Determine if a value is addressable.
+ *
+ * call-seq:
+ *   is_addressable = value.addressable?
+ */
 static VALUE value_is_addressable(VALUE self)
 {
   jit_value_t value;
@@ -1053,6 +1092,11 @@ static VALUE value_is_addressable(VALUE self)
   return jit_value_is_addressable(value) ? Qtrue : Qfalse;
 }
 
+/* Make a value addressable.
+ *
+ * call-seq:
+ *   value.addressable = is_addressable
+ */
 static VALUE value_set_addressable(VALUE self)
 {
   jit_value_t value;
@@ -1061,6 +1105,11 @@ static VALUE value_set_addressable(VALUE self)
   return Qnil;
 }
 
+/* Get a value's function.
+ *
+ * call-seq:
+ *   function = value.function()
+ */
 static VALUE value_function(VALUE self)
 {
   jit_value_t value;
@@ -1075,6 +1124,11 @@ static VALUE value_function(VALUE self)
  * ---------------------------------------------------------------------------
  */
 
+/* Create a new label.
+ *
+ * call-seq:
+ *   label = Label.new
+ */
 static VALUE label_s_new(VALUE klass)
 {
   jit_label_t * label;
@@ -1088,6 +1142,11 @@ static VALUE label_s_new(VALUE klass)
  * ---------------------------------------------------------------------------
  */
 
+/* Use a Function to define an instance method on a module.
+ *
+ * call-seq:
+ *   module.define_libjit_method(name, function, arity)
+ */
 static VALUE module_define_libjit_method(VALUE klass, VALUE name, VALUE function, VALUE arity)
 {
   /* TODO: I think that by using a closure here, we have a memory leak
@@ -1130,20 +1189,13 @@ void Init_jit()
   rb_define_alias(rb_cFunction, "call", "apply");
   rb_define_method(rb_cFunction, "value", function_value, 1);
   rb_define_method(rb_cFunction, "const", function_const, 2);
-  /*
-  rb_define_method(rb_cFunction, "ruby_sourceline", function_ruby_sourceline, 0);
-  rb_define_method(rb_cFunction, "ruby_sourcefile", function_ruby_sourcefile, 0);
-  */
-  rb_define_method(rb_cFunction, "set_ruby_source", function_set_ruby_source, 1); // TODO
   rb_define_method(rb_cFunction, "optimization_level", function_optimization_level, 0);
   rb_define_method(rb_cFunction, "optimization_level=", function_set_optimization_level, 1);
   rb_define_singleton_method(rb_cFunction, "max_optimization_level", function_max_optimization_level, 0);
-  rb_define_method(rb_cFunction, "to_s", function_to_s, 0);
+  rb_define_method(rb_cFunction, "dump", function_dump, 0);
   rb_define_method(rb_cFunction, "to_closure", function_to_closure, 0);
   rb_define_method(rb_cFunction, "context", function_get_context, 0);
   rb_define_method(rb_cFunction, "compiled?", function_is_compiled, 0);
-  rb_define_method(rb_cFunction, "ruby_array_length", function_ruby_array_length, 1);
-  rb_define_method(rb_cFunction, "ruby_array_ptr", function_ruby_array_ptr, 1);
 
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
@@ -1165,17 +1217,11 @@ void Init_jit()
   rb_define_const(rb_cType, "NFLOAT", wrap_type(jit_type_nfloat));
   rb_define_const(rb_cType, "VOID_PTR", wrap_type(jit_type_void_ptr));
 
-  jit_type_VALUE = jit_type_create_tagged(jit_underlying_type_VALUE, OBJECT_TAG, 0, 0, 1);
+  jit_type_VALUE = jit_type_create_tagged(jit_underlying_type_VALUE, RJT_OBJECT, 0, 0, 1);
   rb_define_const(rb_cType, "OBJECT", wrap_type(jit_type_VALUE));
 
-  jit_type_ID = jit_type_create_tagged(jit_underlying_type_ID, ID_TAG, 0, 0, 1);
+  jit_type_ID = jit_type_create_tagged(jit_underlying_type_ID, RJT_ID, 0, 0, 1);
   rb_define_const(rb_cType, "ID", wrap_type(jit_type_ID));
-
-  jit_type_CSTRING = jit_type_create_tagged(jit_type_void_ptr, CSTRING_TAG, 0, 0, 1);
-  rb_define_const(rb_cType, "CSTRING", wrap_type(jit_type_CSTRING));
-
-  jit_type_CLONG = jit_type_create_tagged(jit_underlying_type_CLONG, CLONG_TAG, 0, 0, 1);
-  rb_define_const(rb_cType, "CLONG", wrap_type(jit_type_CLONG));
 
   {
     jit_type_t ruby_vararg_param_types[] = { jit_type_int, jit_type_void_ptr, jit_type_VALUE };
@@ -1185,7 +1231,7 @@ void Init_jit()
           ruby_vararg_param_types,
           3,
           1);
-    ruby_vararg_signature = jit_type_create_tagged(ruby_vararg_signature_untagged, RUBY_VARARG_SIGNATURE_TAG, 0, 0, 1);
+    ruby_vararg_signature = jit_type_create_tagged(ruby_vararg_signature_untagged, RJT_RUBY_VARARG_SIGNATURE, 0, 0, 1);
   }
   rb_define_const(rb_cType, "RUBY_VARARG_SIGNATURE", wrap_type(ruby_vararg_signature));
 

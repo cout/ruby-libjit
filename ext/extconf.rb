@@ -37,6 +37,11 @@ $(OBJS): #{generated_headers.join(' ')}
 clean: clean_generated_files
 clean_generated_files:
 	@$(RM) #{generated_files.join(' ')}
+
+install: rubyjit.h
+install: $(includedir)/rubyjit.h
+$(includedir)/rubyjit.h:
+	$(INSTALL_PROG) rubyjit.h $(includedir)
 END
 
 File.open('Makefile', 'a') do |makefile|
