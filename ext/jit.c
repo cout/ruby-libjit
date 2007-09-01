@@ -68,10 +68,11 @@ static void context_mark(jit_context_t context)
   rb_gc_mark(functions);
 }
 
-/* Create a new context.
- *
+/* 
  * call-seq:
  *   context = Context.new
+ *
+ * Create a new context.
  */
 static VALUE context_s_new(VALUE klass)
 {
@@ -80,24 +81,30 @@ static VALUE context_s_new(VALUE klass)
   return Data_Wrap_Struct(rb_cContext, context_mark, jit_context_destroy, context);
 }
 
-/* Acquire a lock on the context so it can be used to build a function.
- *
+/* 
  * call-seq:
  *   context.build { ... }
+ *
+ * Acquire a lock on the context so it can be used to build a function.
  */
 static VALUE context_build(VALUE self)
 {
   jit_context_t context;
   Data_Get_Struct(self, struct _jit_context, context);
   jit_context_build_start(context);
-  return rb_ensure(rb_yield, self, RUBY_METHOD_FUNC(jit_context_build_end), (VALUE)context);
+  return rb_ensure(
+      rb_yield,
+      self,
+      RUBY_METHOD_FUNC(jit_context_build_end),
+      (VALUE)context);
 }
 
-/* Create a context and acquire a lock on it, then yield the context to
- * the block.
- *
+/*
  * call-seq:
  *   Context.build { |context| ... }
+ *
+ * Create a context and acquire a lock on it, then yield the context to
+ * the block.
  */
 static VALUE context_s_build(VALUE klass)
 {
@@ -117,38 +124,44 @@ static void mark_function(jit_function_t function)
 
 static VALUE create_function(int argc, VALUE * argv, VALUE klass)
 {
-  VALUE context;
-  VALUE signature;
-  VALUE parent;
+  VALUE context_v;
+  VALUE signature_v;
+  VALUE parent_function_v;
+
   jit_function_t function;
   jit_function_t parent_function;
-  jit_context_t jit_context;
-  jit_type_t jit_signature;
-  jit_type_t jit_real_signature;
-  VALUE function_obj;
+  jit_context_t context;
+  jit_type_t signature;
+  jit_type_t untagged_signature;
+
+  VALUE function_v;
   VALUE functions;
+
   int signature_tag;
 
-  rb_scan_args(argc, argv, "21", &context, &signature, &parent);
+  rb_scan_args(argc, argv, "21", &context_v, &signature_v, &parent_function_v);
 
-  Data_Get_Struct(context, struct _jit_context, jit_context);
-  Data_Get_Struct(signature, struct _jit_type, jit_signature);
+  Data_Get_Struct(context_v, struct _jit_context, context);
+  Data_Get_Struct(signature_v, struct _jit_type, signature);
 
-  signature_tag = jit_type_get_kind(jit_signature);
+  signature_tag = jit_type_get_kind(signature);
 
-  if((jit_real_signature = jit_type_get_tagged_type(jit_signature)))
+  /* If this signature was tagged, get the untagged type */
+  if((untagged_signature = jit_type_get_tagged_type(signature)))
   {
-    jit_signature = jit_real_signature;
+    signature = untagged_signature;
   }
 
-  if(RTEST(parent))
+  if(RTEST(parent_function_v))
   {
-    Data_Get_Struct(parent, struct _jit_function, parent_function);
-    function = jit_function_create_nested(jit_context, jit_signature, parent_function);
+    /* If this function has a parent, then it is a nested function */
+    Data_Get_Struct(parent_function_v, struct _jit_function, parent_function);
+    function = jit_function_create_nested(context, signature, parent_function);
   }
   else
   {
-    function = jit_function_create(jit_context, jit_signature);
+    /* Otherwise, it's a standalone function */
+    function = jit_function_create(context, signature);
   }
 
   /* Make sure the function is around as long as the context is */
@@ -163,23 +176,26 @@ static VALUE create_function(int argc, VALUE * argv, VALUE klass)
     rb_raise(rb_eNoMemError, "Out of memory");
   }
 
-  if(!jit_function_set_meta(function, RJT_CONTEXT, (void *)context, 0, 0))
+  /* And remember the function's context for later */
+  if(!jit_function_set_meta(function, RJT_CONTEXT, (void *)context_v, 0, 0))
   {
     rb_raise(rb_eNoMemError, "Out of memory");
   }
 
-  function_obj = Data_Wrap_Struct(rb_cFunction, mark_function, 0, function);
+  function_v = Data_Wrap_Struct(rb_cFunction, mark_function, 0, function);
 
-  functions = (VALUE)jit_context_get_meta(jit_context, RJT_FUNCTIONS);
-  rb_ary_push(functions, function_obj);
+  /* Add this function to the context's list of functions */
+  functions = (VALUE)jit_context_get_meta(context, RJT_FUNCTIONS);
+  rb_ary_push(functions, function_v);
 
-  return function_obj;
+  return function_v;
 }
 
-/* Begin compiling a function.
- *
+/*
  * call-seq:
  *   function.compile()
+ *
+ * Begin compiling a function.
  */
 static VALUE function_compile(VALUE self)
 {
@@ -192,10 +208,11 @@ static VALUE function_compile(VALUE self)
   return self;
 }
 
-/* Create a new function.
- *
+/*
  * call-seq:
  *   function = Function.new(context, signature, [parent])
+ *
+ * Create a new function.
  */
 static VALUE function_s_new(int argc, VALUE * argv, VALUE klass)
 {
@@ -207,11 +224,12 @@ static VALUE function_s_new(int argc, VALUE * argv, VALUE klass)
   return create_function(argc, argv, klass);
 }
 
-/* Create a new function, begin compiling it, and pass the function to
- * the block.
- *
+/*
  * call-seq:
  *   function = Function.new(context, signature, [parent]) { |function| ... }
+ *
+ * Create a new function, begin compiling it, and pass the function to
+ * the block.
  */
 static VALUE function_s_compile(int argc, VALUE * argv, VALUE klass)
 {
@@ -223,7 +241,8 @@ static VALUE function_s_compile(int argc, VALUE * argv, VALUE klass)
   return function;
 }
 
-/* Get the value that corresponds to a specified function parameter.
+/*
+ * Get the value that corresponds to a specified function parameter.
  *
  * call-seq:
  *   value = function.get_param(index)
@@ -231,125 +250,137 @@ static VALUE function_s_compile(int argc, VALUE * argv, VALUE klass)
 static VALUE function_get_param(VALUE self, VALUE idx)
 {
   jit_function_t function;
-  jit_value_t v;
+  jit_value_t value;
   Data_Get_Struct(self, struct _jit_function, function);
-  v = jit_value_get_param(function, NUM2INT(idx));
-  raise_memory_error_if_zero(v);
-  return Data_Wrap_Struct(rb_cValue, 0, 0, v);
+  value = jit_value_get_param(function, NUM2INT(idx));
+  raise_memory_error_if_zero(value);
+  return Data_Wrap_Struct(rb_cValue, 0, 0, value);
 }
 
 #include "insns.inc"
 
-/* Generate an instruction to call the specified function.
- *
+/* 
  * call-seq:
  *   value = function.call(name, called_function, flags, [arg1 [, ... ]])
+ *
+ * Generate an instruction to call the specified function.
  */
 static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
 {
   jit_function_t function;
 
-  VALUE name;
-  VALUE called_function;
-  VALUE args;
-  VALUE flags = Qnil;
+  VALUE name_v;
+  VALUE called_function_v;
+  VALUE args_v;
+  VALUE flags_v = Qnil;
 
-  char const * j_name;
-  jit_function_t j_called_function;
-  jit_value_t * j_args;
+  char const * name;
+  jit_function_t called_function;
+  jit_value_t * args;
   jit_value_t retval;
-  int j_flags;
+  int flags;
+  size_t num_args;
 
   int j;
 
-  rb_scan_args(argc, argv, "3*", &name, &called_function, &flags, &args);
+  rb_scan_args(argc, argv, "3*", &name_v, &called_function_v, &flags_v, &args_v);
 
   Data_Get_Struct(self, struct _jit_function, function);
-  j_name = STR2CSTR(name);
-  check_type("called function", rb_cFunction, called_function);
-  Data_Get_Struct(called_function, struct _jit_function, j_called_function);
-  j_args = ALLOCA_N(jit_value_t, RARRAY(args)->len);
 
-  for(j = 0; j < RARRAY(args)->len; ++j)
+  name = STR2CSTR(name_v);
+
+  check_type("called function", rb_cFunction, called_function_v);
+  Data_Get_Struct(called_function_v, struct _jit_function, called_function);
+
+  num_args = RARRAY(args_v)->len;
+  args = ALLOCA_N(jit_value_t, num_args);
+
+  /* Iterate over all the arguments and unwrap them one by one */
+  for(j = 0; j < num_args; ++j)
   {
     jit_value_t arg;
-    Data_Get_Struct(RARRAY(args)->ptr[j], struct _jit_value, arg);
+    Data_Get_Struct(RARRAY(args_v)->ptr[j], struct _jit_value, arg);
     if(!arg)
     {
       rb_raise(rb_eArgError, "Argument %d is invalid", j);
     }
-    j_args[j] = arg;
+    args[j] = arg;
   }
-  j_flags = NUM2INT(flags);
+
+  flags = NUM2INT(flags_v);
 
   retval = jit_insn_call(
-      function, j_name, j_called_function, 0, j_args, RARRAY(args)->len, j_flags);
+      function, name, called_function, 0, args, num_args, flags);
   return Data_Wrap_Struct(rb_cValue, 0, 0, retval);
 }
 
-/* Generate an instruction to call a native function.
- *
+/*
  * call-seq:
  *   value = function.call(name, flags, [arg1 [, ... ]])
+ *
+ * Generate an instruction to call a native function.
  */
 static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
 {
   jit_function_t function;
 
-  VALUE name;
-  VALUE args;
-  VALUE flags = Qnil;
+  VALUE name_v;
+  VALUE args_v;
+  VALUE flags_v = Qnil;
 
-  char const * j_name;
-  jit_value_t * j_args;
+  char const * name;
+  jit_value_t * args;
   jit_value_t retval;
-  int j_flags;
+  int flags;
+  size_t num_args;
 
   int j;
 
   jit_type_t signature;
   void * native_func = 0;
 
-  rb_scan_args(argc, argv, "2*", &name, &flags, &args);
+  rb_scan_args(argc, argv, "2*", &name_v, &flags_v, &args_v);
 
   Data_Get_Struct(self, struct _jit_function, function);
-  j_name = rb_id2name(SYM2ID(name));
+  name = rb_id2name(SYM2ID(name_v));
 
-  j_args = ALLOCA_N(jit_value_t, RARRAY(args)->len);
+  num_args = RARRAY(args_v)->len;
+  args = ALLOCA_N(jit_value_t, num_args);
 
-  for(j = 0; j < RARRAY(args)->len; ++j)
+  /* Iterate over all the arguments and unwrap them one by one */
+  for(j = 0; j < num_args; ++j)
   {
     jit_value_t arg;
-    Data_Get_Struct(RARRAY(args)->ptr[j], struct _jit_value, arg);
+    Data_Get_Struct(RARRAY(args_v)->ptr[j], struct _jit_value, arg);
     if(!arg)
     {
       rb_raise(rb_eArgError, "Argument %d is invalid", j);
     }
-    j_args[j] = arg;
+    args[j] = arg;
   }
-  j_flags = NUM2INT(flags);
+  flags = NUM2INT(flags_v);
 
-  if(SYM2ID(name) == rb_intern("rb_funcall"))
+  if(SYM2ID(name_v) == rb_intern("rb_funcall"))
   {
     /* TODO: what to do about exceptions? */
     /* TODO: validate num args? */
 
     VALUE sprintf_args[] = {
         rb_str_new2("%s(%s)"),
-        name,
-        ID2SYM(jit_value_get_nint_constant(j_args[1])),
+        name_v,
+        ID2SYM(jit_value_get_nint_constant(args[1])),
     };
-    name = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
-    j_name = STR2CSTR(name);
+    name_v = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
+    name = STR2CSTR(name_v);
 
     native_func = (void *)rb_funcall;
 
-    jit_type_t * param_types = ALLOCA_N(jit_type_t, RARRAY(args)->len);
+    jit_type_t * param_types = ALLOCA_N(jit_type_t, num_args);
     param_types[0] = jit_type_VALUE;
     param_types[1] = jit_type_ID;
     param_types[2] = jit_type_int;
 
-    for(j = 0; j < RARRAY(args)->len; ++j)
+    for(j = 0; j < num_args; ++j)
     {
       param_types[j] = jit_type_VALUE;
     }
@@ -358,54 +389,54 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         jit_abi_cdecl, /* TODO: vararg? */
         jit_type_VALUE,
         param_types,
-        RARRAY(args)->len,
+        num_args,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_funcall2"))
+  else if(SYM2ID(name_v) == rb_intern("rb_funcall2"))
   {
     /* TODO: what to do about exceptions? */
     /* TODO: validate num args? */
 
     VALUE sprintf_args[] = {
         rb_str_new2("%s(%s)"),
-        name,
-        ID2SYM(jit_value_get_nint_constant(j_args[1])),
+        name_v,
+        ID2SYM(jit_value_get_nint_constant(args[1])),
     };
 
-    name = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
-    j_name = STR2CSTR(name);
+    name_v = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
+    name = STR2CSTR(name_v);
     native_func = (void *)rb_funcall2;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID, jit_type_int, jit_type_void_ptr };
     signature = jit_type_create_signature(
         jit_abi_cdecl, /* TODO: vararg? */
         jit_type_VALUE,
         param_types,
-        RARRAY(args)->len,
+        num_args,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_funcall3"))
+  else if(SYM2ID(name_v) == rb_intern("rb_funcall3"))
   {
     /* TODO: what to do about exceptions? */
     /* TODO: validate num args? */
 
     VALUE sprintf_args[] = {
         rb_str_new2("%s(%s)"),
-        name,
-        ID2SYM(jit_value_get_nint_constant(j_args[1])),
+        name_v,
+        ID2SYM(jit_value_get_nint_constant(args[1])),
     };
 
-    name = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
-    j_name = STR2CSTR(name);
+    name_v = rb_f_sprintf(sizeof(sprintf_args)/sizeof(sprintf_args[0]), sprintf_args);
+    name = STR2CSTR(name_v);
     native_func = (void *)rb_funcall3;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID, jit_type_int, jit_type_void_ptr };
     signature = jit_type_create_signature(
         jit_abi_cdecl, /* TODO: vararg? */
         jit_type_VALUE,
         param_types,
-        RARRAY(args)->len,
+        num_args,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_iterate"))
+  else if(SYM2ID(name_v) == rb_intern("rb_iterate"))
   {
     native_func = (void *)rb_iterate;
     jit_type_t param_types[] = { jit_type_void_ptr, jit_type_void_ptr, jit_type_void_ptr, jit_type_void_ptr };
@@ -416,7 +447,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         4,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_const_get"))
+  else if(SYM2ID(name_v) == rb_intern("rb_const_get"))
   {
     native_func = (void *)rb_const_get;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID };
@@ -427,7 +458,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         2,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_class_of"))
+  else if(SYM2ID(name_v) == rb_intern("rb_class_of"))
   {
     native_func = (void *)rb_class_of;
     jit_type_t param_types[] = { jit_type_VALUE };
@@ -438,7 +469,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         1,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_str_dup"))
+  else if(SYM2ID(name_v) == rb_intern("rb_str_dup"))
   {
     native_func = (void *)rb_str_dup;
     jit_type_t param_types[] = { jit_type_VALUE };
@@ -449,7 +480,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         1,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_str_concat"))
+  else if(SYM2ID(name_v) == rb_intern("rb_str_concat"))
   {
     native_func = (void *)rb_str_concat;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE };
@@ -460,7 +491,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         2,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_range_new"))
+  else if(SYM2ID(name_v) == rb_intern("rb_range_new"))
   {
     native_func = (void *)rb_range_new;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE, jit_type_int };
@@ -471,7 +502,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         3,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_ary_new2"))
+  else if(SYM2ID(name_v) == rb_intern("rb_ary_new2"))
   {
     native_func = (void *)rb_ary_new2;
     jit_type_t param_types[] = { jit_type_int };
@@ -482,7 +513,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         1,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_ary_store"))
+  else if(SYM2ID(name_v) == rb_intern("rb_ary_store"))
   {
     native_func = (void *)rb_ary_store;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_int, jit_type_VALUE };
@@ -493,7 +524,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         3,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_ary_entry"))
+  else if(SYM2ID(name_v) == rb_intern("rb_ary_entry"))
   {
     native_func = (void *)rb_ary_entry;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_int };
@@ -504,7 +535,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         2,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_ary_to_ary"))
+  else if(SYM2ID(name_v) == rb_intern("rb_ary_to_ary"))
   {
     native_func = (void *)rb_ary_to_ary;
     jit_type_t param_types[] = { jit_type_VALUE };
@@ -515,7 +546,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         1,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_hash_new"))
+  else if(SYM2ID(name_v) == rb_intern("rb_hash_new"))
   {
     native_func = (void *)rb_hash_new;
     jit_type_t param_types[] = { };
@@ -526,7 +557,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         0,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_hash_aset"))
+  else if(SYM2ID(name_v) == rb_intern("rb_hash_aset"))
   {
     native_func = (void *)rb_hash_aset;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE, jit_type_VALUE };
@@ -537,7 +568,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         3,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_hash_aref"))
+  else if(SYM2ID(name_v) == rb_intern("rb_hash_aref"))
   {
     native_func = (void *)rb_hash_aref;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_VALUE };
@@ -548,7 +579,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         2,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_uint2inum"))
+  else if(SYM2ID(name_v) == rb_intern("rb_uint2inum"))
   {
     native_func = (void *)rb_uint2inum;
     jit_type_t param_types[] = { jit_type_uint };
@@ -559,7 +590,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         1,
         1);
   }
-  else if(SYM2ID(name) == rb_intern("rb_ivar_get"))
+  else if(SYM2ID(name_v) == rb_intern("rb_ivar_get"))
   {
     native_func = (void *)rb_ivar_get;
     jit_type_t param_types[] = { jit_type_VALUE, jit_type_ID };
@@ -572,20 +603,21 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   }
   else
   {
-    rb_raise(rb_eArgError, "Invalid native function %s", j_name);
+    rb_raise(rb_eArgError, "Invalid native function %s", name);
   }
 
   /* TODO: the signature could be leaked if this function raises an
    * exception */
   retval = jit_insn_call_native(
-      function, j_name, native_func, signature, j_args, RARRAY(args)->len, j_flags);
+      function, name, native_func, signature, args, RARRAY(args_v)->len, flags);
   return Data_Wrap_Struct(rb_cValue, 0, 0, retval);
 }
 
-/* Call a compiled function.
- *
+/*
  * call-seq:
  *   function.apply(arg1 [, arg2 [, ... ]])
+ *
+ * Call a compiled function.
  */
 static VALUE function_apply(int argc, VALUE * argv, VALUE self)
 {
@@ -594,6 +626,7 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   int j, n;
   void * * args;
   char * arg_data;
+  int signature_tag;
 
   Data_Get_Struct(self, struct _jit_function, function);
   signature = jit_function_get_signature(function);
@@ -607,20 +640,18 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
    * should be sufficient for now) */
   arg_data = (char *)ALLOCA_N(char, 8 * n);
 
+  signature_tag = (int)jit_function_get_meta(function, RJT_TAG_FOR_SIGNATURE);
+  if(signature_tag == JIT_TYPE_FIRST_TAGGED + RJT_RUBY_VARARG_SIGNATURE)
   {
-    int signature_tag = (int)jit_function_get_meta(function, RJT_TAG_FOR_SIGNATURE);
-    if(signature_tag == JIT_TYPE_FIRST_TAGGED + RJT_RUBY_VARARG_SIGNATURE)
-    {
-      /* TODO: validate the number of args passed in (should be at least
-       * 1) */
-      jit_uint result;
-      int f_argc = argc - 1;
-      VALUE f_self = *(VALUE *)argv;
-      VALUE * f_argv = ((VALUE *)argv) + 1;
-      void * f_args[3] = { &f_argc, &f_argv, &f_self };
-      jit_function_apply(function, f_args, &result);
-      return result;
-    }
+    /* TODO: validate the number of args passed in (should be at least
+     * 1) */
+    jit_uint result;
+    int f_argc = argc - 1;
+    VALUE f_self = *(VALUE *)argv;
+    VALUE * f_argv = ((VALUE *)argv) + 1;
+    void * f_args[3] = { &f_argc, &f_argv, &f_self };
+    jit_function_apply(function, f_args, &result);
+    return result;
   }
 
   /* TODO: validate the number of args passed in */
@@ -693,60 +724,62 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   }
 }
 
-/* Create a value (placeholder/variable) with the given type.
- *
+/*
  * call-seq:
  *   value = function.value(type)
+ *
+ * Create a value (placeholder/variable) with the given type.
  */
-static VALUE function_value(VALUE self, VALUE type)
+static VALUE function_value(VALUE self, VALUE type_v)
 {
   jit_function_t function;
-  jit_type_t j_type;
-  jit_value_t v;
+  jit_type_t type;
+  jit_value_t value;
 
   Data_Get_Struct(self, struct _jit_function, function);
 
-  check_type("type", rb_cType, type);
-  Data_Get_Struct(type, struct _jit_type, j_type);
+  check_type("type", rb_cType, type_v);
+  Data_Get_Struct(type_v, struct _jit_type, type);
 
   // TODO: When we wrap a value, we should inject a reference to the
   // function in the object, so the function stays around as long as the
   // value does
-  v = jit_value_create(function, j_type);
-  return Data_Wrap_Struct(rb_cValue, 0, 0, v);
+  value = jit_value_create(function, type);
+  return Data_Wrap_Struct(rb_cValue, 0, 0, value);
 }
 
-/* Create a constant value with the given type.
- *
+/*
  * call-seq:
  *   value = function.const(type, constant_value)
+ *
+ * Create a constant value with the given type.
  */
-static VALUE function_const(VALUE self, VALUE type, VALUE constant)
+static VALUE function_const(VALUE self, VALUE type_v, VALUE constant)
 {
   jit_function_t function;
-  jit_type_t j_type;
-  jit_value_t v;
+  jit_type_t type;
+  jit_value_t value;
 
   Data_Get_Struct(self, struct _jit_function, function);
 
-  check_type("type", rb_cType, type);
-  Data_Get_Struct(type, struct _jit_type, j_type);
+  check_type("type", rb_cType, type_v);
+  Data_Get_Struct(type_v, struct _jit_type, type);
 
   jit_constant_t c;
 
-  int kind = jit_type_get_kind(j_type);
+  int kind = jit_type_get_kind(type);
   switch(kind)
   {
     case JIT_TYPE_INT:
     {
-      c.type = j_type;
+      c.type = type;
       c.un.int_value = NUM2INT(constant);
       break;
     }
 
     case JIT_TYPE_PTR:
     {
-      c.type = j_type;
+      c.type = type;
       c.un.ptr_value = (void *)NUM2ULONG(constant);
       break;
     }
@@ -755,7 +788,7 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
     {
       VALUE value_objects = (VALUE)jit_function_get_meta(function, RJT_VALUE_OBJECTS);
 
-      c.type = j_type;
+      c.type = type;
       SET_CONSTANT_VALUE(c, constant);
 
       /* Make sure the object gets marked as long as the function is
@@ -767,7 +800,7 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
 
     case JIT_TYPE_FIRST_TAGGED + RJT_ID:
     {
-      c.type = j_type;
+      c.type = type;
       SET_CONSTANT_ID(c, SYM2ID(constant));
       break;
     }
@@ -776,14 +809,15 @@ static VALUE function_const(VALUE self, VALUE type, VALUE constant)
       rb_raise(rb_eTypeError, "Unsupported type");
   }
 
-  v = jit_value_create_constant(function, &c);
-  return Data_Wrap_Struct(rb_cValue, 0, 0, v);
+  value = jit_value_create_constant(function, &c);
+  return Data_Wrap_Struct(rb_cValue, 0, 0, value);
 }
 
-/* Get the optimization level for a function.
- *
+/*
  * call-seq:
  *   level = function.optimization_level()
+ *
+ * Get the optimization level for a function.
  */
 static VALUE function_optimization_level(VALUE self)
 {
@@ -792,10 +826,11 @@ static VALUE function_optimization_level(VALUE self)
   return INT2NUM(jit_function_get_optimization_level(function));
 }
 
-/* Set the optimization level for a function.
- *
+/*
  * call-seq:
  *   function.optimization_level = level
+ *
+ * Set the optimization level for a function.
  */
 static VALUE function_set_optimization_level(VALUE self, VALUE level)
 {
@@ -805,21 +840,23 @@ static VALUE function_set_optimization_level(VALUE self, VALUE level)
   return level;
 }
 
-/* Get the maximum optimization level (which should be the same for any
- * function).
- *
+/*
  * call-seq:
  *   level = function.max_optimization_level()
+ *
+ * Get the maximum optimization level (which should be the same for any
+ * function).
  */
 static VALUE function_max_optimization_level(VALUE klass)
 {
   return INT2NUM(jit_function_get_max_optimization_level());
 }
 
-/* Dump the instructions in a function to a string.
- *
+/*
  * call-seq:
  *   str = function.dump()
+ *
+ * Dump the instructions in a function to a string.
  */
 static VALUE function_dump(VALUE self)
 {
@@ -832,11 +869,12 @@ static VALUE function_dump(VALUE self)
   return rb_str_new2(buf);
 }
 
-/* Return a pointer to a closure for a function.  This pointer can be
- * passed into other functions as a function pointer.
- *
+/*
  * call-seq:
  *   ptr = function.to_closure()
+ *
+ * Return a pointer to a closure for a function.  This pointer can be
+ * passed into other functions as a function pointer.
  */
 static VALUE function_to_closure(VALUE self)
 {
@@ -847,10 +885,11 @@ static VALUE function_to_closure(VALUE self)
   return ULONG2NUM((unsigned long)closure);
 }
 
-/* Get a function's context.
- *
+/*
  * call-seq:
  *   context = function.context()
+ *
+ * Get a function's context.
  */
 static VALUE function_get_context(VALUE self)
 {
@@ -859,10 +898,11 @@ static VALUE function_get_context(VALUE self)
   return (VALUE)jit_function_get_meta(function, RJT_CONTEXT);
 }
 
-/* Determine whether a function is compiled.
- *
+/*
  * call-seq:
  *   is_compiled = function.compiled?
+ *
+ * Determine whether a function is compiled.
  */
 static VALUE function_is_compiled(VALUE self)
 {
@@ -884,36 +924,37 @@ static VALUE wrap_type(jit_type_t type)
   return Data_Wrap_Struct(rb_cType, 0, jit_type_free, type);
 }
 
-/* Create a new signature.
- *
+/*
  * call-seq:
  *   type = Type.create_signature(abi, return_type, array_of_param_types)
+ *
+ * Create a new signature.
  */
 static VALUE type_s_create_signature(
-    VALUE klass, VALUE abi, VALUE return_type, VALUE params)
+    VALUE klass, VALUE abi_v, VALUE return_type_v, VALUE params_v)
 {
-  jit_abi_t j_abi = NUM2INT(abi);
-  jit_type_t j_return_type;
-  jit_type_t * j_params;
+  jit_abi_t abi = NUM2INT(abi_v);
+  jit_type_t return_type;
+  jit_type_t * params;
   jit_type_t signature;
   int j;
   int len;
 
-  check_type("return type", rb_cType, return_type);
+  check_type("return type", rb_cType, return_type_v);
 
-  Data_Get_Struct(return_type, struct _jit_type, j_return_type);
+  Data_Get_Struct(return_type_v, struct _jit_type, return_type);
 
-  Check_Type(params, T_ARRAY);
-  len = RARRAY(params)->len;
-  j_params = ALLOCA_N(jit_type_t, len);
+  Check_Type(params_v, T_ARRAY);
+  len = RARRAY(params_v)->len;
+  params = ALLOCA_N(jit_type_t, len);
   for(j = 0; j < len; ++j)
   {
-    VALUE param = RARRAY(params)->ptr[j];
+    VALUE param = RARRAY(params_v)->ptr[j];
     check_type("param", rb_cType, param);
-    Data_Get_Struct(param, struct _jit_type, j_params[j]);
+    Data_Get_Struct(param, struct _jit_type, params[j]);
   }
 
-  signature = jit_type_create_signature(j_abi, j_return_type, j_params, len, 1);
+  signature = jit_type_create_signature(abi, return_type, params, len, 1);
   return wrap_type(signature);
 }
 
@@ -923,38 +964,39 @@ static VALUE type_s_create_signature(
  *   type = Type.create_struct(array_of_field_types)
  */
 static VALUE type_s_create_struct(
-    VALUE klass, VALUE fields)
+    VALUE klass, VALUE fields_v)
 {
-  jit_type_t * j_fields;
-  jit_type_t j_struct;
+  jit_type_t * fields;
+  jit_type_t struct_type;
   int len;
   int j;
 
-  Check_Type(fields, T_ARRAY);
-  len = RARRAY(fields)->len;
-  j_fields = ALLOCA_N(jit_type_t, len);
+  Check_Type(fields_v, T_ARRAY);
+  len = RARRAY(fields_v)->len;
+  fields = ALLOCA_N(jit_type_t, len);
   for(j = 0; j < len; ++j)
   {
-    VALUE field = RARRAY(fields)->ptr[j];
+    VALUE field = RARRAY(fields_v)->ptr[j];
     check_type("field", rb_cType, field);
-    Data_Get_Struct(field, struct _jit_type, j_fields[j]);
+    Data_Get_Struct(field, struct _jit_type, fields[j]);
   }
 
-  j_struct = jit_type_create_struct(j_fields, RARRAY(fields)->len, 1);
-  return wrap_type(j_struct);
+  struct_type = jit_type_create_struct(fields, RARRAY(fields_v)->len, 1);
+  return wrap_type(struct_type);
 }
 
-/* Get the offset of the nth field in a struct.
- *
+/*
  * call-seq:
  *   offset = struct_type.get_offset(index)
+ *
+ * Get the offset of the nth field in a struct.
  */
-static VALUE type_get_offset(VALUE self, VALUE field_index)
+static VALUE type_get_offset(VALUE self, VALUE field_index_v)
 {
-  int j_field_index = NUM2INT(field_index);
+  int field_index = NUM2INT(field_index_v);
   jit_type_t type;
   Data_Get_Struct(self, struct _jit_type, type);
-  return INT2NUM(jit_type_get_offset(type, j_field_index));
+  return INT2NUM(jit_type_get_offset(type, field_index));
 }
 
 /* ---------------------------------------------------------------------------
@@ -962,10 +1004,11 @@ static VALUE type_get_offset(VALUE self, VALUE field_index)
  * ---------------------------------------------------------------------------
  */
 
-/* Return a string representation of the value.
- *
+/*
  * call-seq:
  *   str = value.to_s
+ *
+ * Return a string representation of the value.
  */
 static VALUE value_to_s(VALUE self)
 {
@@ -981,11 +1024,12 @@ static VALUE value_to_s(VALUE self)
   return rb_str_new2(buf);
 }
 
-/* Return a string representation of a value with additional
- * information about the value.
- *
+/*
  * call-seq:
  *   str = value.inspect
+ *
+ * Return a string representation of a value with additional
+ * information about the value.
  */
 static VALUE value_inspect(VALUE self)
 {
@@ -1005,10 +1049,11 @@ static VALUE value_inspect(VALUE self)
   return rb_f_sprintf(sizeof(args)/sizeof(args[0]), args);
 }
 
-/* Determine if a value is valid (non-zero).
- *
+/*
  * call-seq:
  *   is_valid = value.valid?
+ *
+ * Determine if a value is valid (non-zero).
  */
 static VALUE value_is_valid(VALUE self)
 {
@@ -1017,10 +1062,11 @@ static VALUE value_is_valid(VALUE self)
   return value != 0;
 }
 
-/* Determine if a value represents a temporary.
- *
+/*
  * call-seq:
  *   is_temporary = value.temporary?
+ *
+ * Determine if a value represents a temporary.
  */
 static VALUE value_is_temporary(VALUE self)
 {
@@ -1029,10 +1075,11 @@ static VALUE value_is_temporary(VALUE self)
   return jit_value_is_temporary(value) ? Qtrue : Qfalse;
 }
 
-/* Determine if a value represents a local.
- *
+/*
  * call-seq:
  *   is_local = value.local?
+ *
+ * Determine if a value represents a local.
  */
 static VALUE value_is_local(VALUE self)
 {
@@ -1041,10 +1088,11 @@ static VALUE value_is_local(VALUE self)
   return jit_value_is_local(value) ? Qtrue : Qfalse;
 }
 
-/* Determine if a value represents a constant.
- *
+/*
  * call-seq:
  *   is_local = value.constant?
+ *
+ * Determine if a value represents a constant.
  */
 static VALUE value_is_constant(VALUE self)
 {
@@ -1053,11 +1101,12 @@ static VALUE value_is_constant(VALUE self)
   return jit_value_is_constant(value) ? Qtrue : Qfalse;
 }
 
-/* Determine if a value is volatile (that is, the contents must be
- * reloaded from memory each time it is used).
- *
+/*
  * call-seq:
  *   is_volatile = value.volatile?
+ *
+ * Determine if a value is volatile (that is, the contents must be
+ * reloaded from memory each time it is used).
  */
 static VALUE value_is_volatile(VALUE self)
 {
@@ -1066,11 +1115,12 @@ static VALUE value_is_volatile(VALUE self)
   return jit_value_is_volatile(value) ? Qtrue : Qfalse;
 }
 
-/* Make a value volatile (that is, ensure that its contents are reloaded
- * from memory each time it is used).
- *
+/*
  * call-seq:
  *   value.volatile = is_volatile
+ *
+ * Make a value volatile (that is, ensure that its contents are reloaded
+ * from memory each time it is used).
  */
 static VALUE value_set_volatile(VALUE self)
 {
@@ -1080,10 +1130,11 @@ static VALUE value_set_volatile(VALUE self)
   return Qnil;
 }
 
-/* Determine if a value is addressable.
- *
+/*
  * call-seq:
  *   is_addressable = value.addressable?
+ *
+ * Determine if a value is addressable.
  */
 static VALUE value_is_addressable(VALUE self)
 {
@@ -1092,10 +1143,11 @@ static VALUE value_is_addressable(VALUE self)
   return jit_value_is_addressable(value) ? Qtrue : Qfalse;
 }
 
-/* Make a value addressable.
- *
+/*
  * call-seq:
  *   value.addressable = is_addressable
+ *
+ * Make a value addressable.
  */
 static VALUE value_set_addressable(VALUE self)
 {
@@ -1105,10 +1157,11 @@ static VALUE value_set_addressable(VALUE self)
   return Qnil;
 }
 
-/* Get a value's function.
- *
+/*
  * call-seq:
  *   function = value.function()
+ *
+ * Get a value's function.
  */
 static VALUE value_function(VALUE self)
 {
@@ -1124,10 +1177,11 @@ static VALUE value_function(VALUE self)
  * ---------------------------------------------------------------------------
  */
 
-/* Create a new label.
- *
+/*
  * call-seq:
  *   label = Label.new
+ *
+ * Create a new label.
  */
 static VALUE label_s_new(VALUE klass)
 {
@@ -1142,22 +1196,23 @@ static VALUE label_s_new(VALUE klass)
  * ---------------------------------------------------------------------------
  */
 
-/* Use a Function to define an instance method on a module.
- *
+/*
  * call-seq:
  *   module.define_libjit_method(name, function, arity)
+ *
+ * Use a Function to define an instance method on a module.
  */
-static VALUE module_define_libjit_method(VALUE klass, VALUE name, VALUE function, VALUE arity)
+static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE function_v, VALUE arity_v)
 {
   /* TODO: I think that by using a closure here, we have a memory leak
    * if the method is ever redefined. */
-  char const * c_name = STR2CSTR(name);
-  jit_function_t j_function;
-  Data_Get_Struct(function, struct _jit_function, j_function);
-  int c_arity = NUM2INT(arity); /* TODO: validate */
-  void * closure = jit_function_to_closure(j_function);
-  rb_ary_push(libjit_closure_functions, function);
-  rb_define_method(klass, c_name, closure, c_arity);
+  char const * name = STR2CSTR(name_v);
+  jit_function_t function;
+  Data_Get_Struct(function_v, struct _jit_function, function);
+  int arity = NUM2INT(arity_v); /* TODO: validate */
+  void * closure = jit_function_to_closure(function);
+  rb_ary_push(libjit_closure_functions, function_v);
+  rb_define_method(klass, name, closure, arity);
   return Qnil;
 }
 
