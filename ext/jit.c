@@ -380,7 +380,9 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   for(j = 0; j < num_args; ++j)
   {
     jit_value_t arg;
-    Data_Get_Struct(RARRAY(args_v)->ptr[j], struct _jit_value, arg);
+    VALUE value = RARRAY(args_v)->ptr[j];
+    check_type("argument", rb_cValue, value);
+    Data_Get_Struct(value, struct _jit_value, arg);
     if(!arg)
     {
       rb_raise(rb_eArgError, "Argument %d is invalid", j);
