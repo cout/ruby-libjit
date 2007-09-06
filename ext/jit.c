@@ -463,6 +463,14 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         break;
       }
 
+      case JIT_TYPE_UINT:
+      {
+        *(int *)arg_data = NUM2UINT(argv[j]);
+        args[j] = (int *)arg_data;
+        arg_data += sizeof(int);
+        break;
+      }
+
       case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
       {
         *(VALUE *)arg_data = argv[j];
@@ -566,6 +574,13 @@ static VALUE function_const(VALUE self, VALUE type_v, VALUE constant)
     {
       c.type = type;
       c.un.int_value = NUM2INT(constant);
+      break;
+    }
+
+    case JIT_TYPE_UINT:
+    {
+      c.type = type;
+      c.un.int_value = NUM2UINT(constant);
       break;
     }
 
