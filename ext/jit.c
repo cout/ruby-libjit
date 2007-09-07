@@ -807,6 +807,19 @@ static VALUE type_get_offset(VALUE self, VALUE field_index_v)
   return INT2NUM(jit_type_get_offset(type, field_index));
 }
 
+/*
+ * call-seq:
+ *   offset = struct_type.size
+ *
+ * Get the size of a struct or union type.
+ */
+static VALUE type_size(VALUE self)
+{
+  jit_type_t type;
+  Data_Get_Struct(self, struct _jit_type, type);
+  return INT2NUM(jit_type_get_size(type));
+}
+
 /* ---------------------------------------------------------------------------
  * Value
  * ---------------------------------------------------------------------------
@@ -1085,6 +1098,7 @@ void Init_jit()
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
   rb_define_singleton_method(rb_cType, "create_struct", type_s_create_struct, 1);
   rb_define_method(rb_cType, "get_offset", type_get_offset, 1);
+  rb_define_method(rb_cType, "size", type_size, 0);
   rb_define_const(rb_cType, "VOID", wrap_type(jit_type_void));
   rb_define_const(rb_cType, "SBYTES", wrap_type(jit_type_sbyte));
   rb_define_const(rb_cType, "UBYTE", wrap_type(jit_type_ubyte));
