@@ -1151,7 +1151,7 @@ void Init_jit()
   rb_define_method(rb_cValue, "local?", value_is_local, 0);
   rb_define_method(rb_cValue, "constant?", value_is_constant, 0);
   rb_define_method(rb_cValue, "volatile?", value_is_volatile, 0);
-  rb_define_method(rb_cValue, "volatile=", value_set_volatile, 0);
+  rb_define_method(rb_cValue, "set_volatile", value_set_volatile, 0);
   rb_define_method(rb_cValue, "addressable?", value_is_addressable, 0);
   rb_define_method(rb_cValue, "addressable=", value_set_addressable, 0);
   rb_define_method(rb_cValue, "function", value_function, 0);
