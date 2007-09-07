@@ -866,7 +866,7 @@ static VALUE value_is_valid(VALUE self)
 {
   jit_value_t value;
   Data_Get_Struct(self, struct _jit_value, value);
-  return value != 0;
+  return (value != 0) ? Qtrue : Qfalse;
 }
 
 /*
