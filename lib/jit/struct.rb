@@ -3,7 +3,7 @@ require 'jit'
 module JIT
   class Struct < JIT::Type
     def self.new(*members)
-      member_names = members.map { |m| m[0] }
+      member_names = members.map { |m| m[0].to_s.intern }
       member_types = members.map { |m| m[1] }
       type = self.create_struct(member_types)
       type.instance_eval do
@@ -29,10 +29,12 @@ module JIT
     end
 
     def offset_of(name)
+      name = (Symbol === name) ? name : name.to_s.intern
       return self.get_offset(@member_names.index(name))
     end
 
     def type_of(name)
+      name = (Symbol === name) ? name : name.to_s.intern
       return @member_types[@member_names.index(name)]
     end
 
