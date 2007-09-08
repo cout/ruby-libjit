@@ -398,6 +398,33 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
 
 /*
  * call-seq:
+ *   function.insn_return()
+ *   function.insn_return(value)
+ *
+ * Emit an instruction to return from the function.  If value is
+ * specified, return the given value, otherwise return void.
+ */
+static VALUE function_insn_return(int argc, VALUE * argv, VALUE self)
+{
+  jit_function_t function;
+  jit_value_t value = 0;
+  VALUE value_v = Qnil;
+
+  rb_scan_args(argc, argv, "01", &value_v);
+
+  if(value_v != Qnil)
+  {
+    Data_Get_Struct(value_v, struct _jit_value, value);
+  }
+
+  Data_Get_Struct(self, struct _jit_function, function);
+  jit_insn_return(function, value);
+
+  return Qnil;
+}
+
+/*
+ * call-seq:
  *   function.apply(arg1 [, arg2 [, ... ]])
  *
  * Call a compiled function.  Each argument passed in will be converted
@@ -1082,6 +1109,7 @@ void Init_jit()
   init_insns();
   rb_define_method(rb_cFunction, "insn_call", function_insn_call, -1);
   rb_define_method(rb_cFunction, "insn_call_native", function_insn_call_native, -1);
+  rb_define_method(rb_cFunction, "insn_return", function_insn_return, -1);
   rb_define_method(rb_cFunction, "apply", function_apply, -1);
   rb_define_alias(rb_cFunction, "call", "apply");
   rb_define_method(rb_cFunction, "value", function_value, 1);
