@@ -13,8 +13,8 @@ module JIT
       end
     end
 
-    def store(function, value)
-      function.insn_store(self, value)
+    def store(value)
+      self.function.insn_store(self, value)
     end
 
     def is_fixnum
@@ -52,6 +52,14 @@ module JIT
 
     def >=(rhs)
       return self.function.insn_ge(self, rhs)
+    end
+
+    def <<(rhs)
+      return self.function.insn_shl(self, rhs)
+    end
+
+    def >>(rhs)
+      return self.function.insn_shr(self, rhs)
     end
   end
 end
