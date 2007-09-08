@@ -754,9 +754,14 @@ static VALUE function_is_compiled(VALUE self)
 /* This function does not increment the reference count.  It is assumed
  * that the caller will increment the reference count and that the newly
  * wrapped object will take ownership. */
+static VALUE wrap_type_with_klass(jit_type_t type, VALUE klass)
+{
+  return Data_Wrap_Struct(klass, 0, jit_type_free, type);
+}
+
 static VALUE wrap_type(jit_type_t type)
 {
-  return Data_Wrap_Struct(rb_cType, 0, jit_type_free, type);
+  return wrap_type_with_klass(type, rb_cType);
 }
 
 /*
@@ -817,7 +822,7 @@ static VALUE type_s_create_struct(
   }
 
   struct_type = jit_type_create_struct(fields, RARRAY(fields_v)->len, 1);
-  return wrap_type(struct_type);
+  return wrap_type_with_klass(struct_type, klass);
 }
 
 /*
