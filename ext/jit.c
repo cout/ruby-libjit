@@ -38,7 +38,7 @@ typedef jit_uint jit_ID;
 
 static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 {
-  if(CLASS_OF(val) != expected_klass)
+  if(!rb_obj_is_kind_of(val, expected_klass))
   {
     rb_raise(
         rb_eTypeError,
@@ -551,13 +551,7 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   }
 }
 
-/*
- * call-seq:
- *   value = function.value(type)
- *
- * Create a value (placeholder/variable) with the given type.
- */
-static VALUE function_value(VALUE self, VALUE type_v)
+static VALUE function_value_klass(VALUE self, VALUE type_v, VALUE klass)
 {
   jit_function_t function;
   jit_type_t type;
@@ -572,7 +566,18 @@ static VALUE function_value(VALUE self, VALUE type_v)
    * function in the object, so the function stays around as long as the
    * value does */
   value = jit_value_create(function, type);
-  return Data_Wrap_Struct(rb_cValue, 0, 0, value);
+  return Data_Wrap_Struct(klass, 0, 0, value);
+}
+
+/*
+ * call-seq:
+ *   value = function.value(type)
+ *
+ * Create a value (placeholder/variable) with the given type.
+ */
+static VALUE function_value(VALUE self, VALUE type_v)
+{
+  return function_value_klass(self, type_v, rb_cValue);
 }
 
 /*
@@ -798,10 +803,11 @@ static VALUE type_s_create_signature(
   return wrap_type(signature);
 }
 
-/* Create a new struct type.
- *
+/*
  * call-seq:
  *   type = Type.create_struct(array_of_field_types)
+ *
+ * Create a new struct type.
  */
 static VALUE type_s_create_struct(
     VALUE klass, VALUE fields_v)
@@ -823,6 +829,22 @@ static VALUE type_s_create_struct(
 
   struct_type = jit_type_create_struct(fields, RARRAY(fields_v)->len, 1);
   return wrap_type_with_klass(struct_type, klass);
+}
+
+/*
+ * call-seq:
+ *   type = Type.create_pointer(pointed_to_type)
+ *
+ * Create a new pointer type, pointing to the given type.
+ */
+static VALUE type_s_create_pointer(
+    VALUE klass, VALUE type_v)
+{
+  jit_type_t type;
+  jit_type_t pointer_type;
+  Data_Get_Struct(type_v, struct _jit_type, type);
+  pointer_type = jit_type_create_pointer(type, 1);
+  return wrap_type_with_klass(pointer_type, klass);
 }
 
 /*
@@ -856,6 +878,11 @@ static VALUE type_size(VALUE self)
  * Value
  * ---------------------------------------------------------------------------
  */
+
+static VALUE value_s_new_value(VALUE klass, VALUE function, VALUE type)
+{
+  return function_value_klass(function, type, klass);
+}
 
 /*
  * call-seq:
@@ -1130,6 +1157,7 @@ void Init_jit()
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
   rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
   rb_define_singleton_method(rb_cType, "create_struct", type_s_create_struct, 1);
+  rb_define_singleton_method(rb_cType, "create_pointer", type_s_create_pointer, 1);
   rb_define_method(rb_cType, "get_offset", type_get_offset, 1);
   rb_define_method(rb_cType, "size", type_size, 0);
   rb_define_const(rb_cType, "VOID", wrap_type(jit_type_void));
@@ -1177,6 +1205,7 @@ void Init_jit()
   rb_define_const(rb_mABI, "FASTCALL", INT2NUM(jit_abi_fastcall));
 
   rb_cValue = rb_define_class_under(rb_mJIT, "Value", rb_cObject);
+  rb_define_singleton_method(rb_cValue, "new_value", value_s_new_value, 2);
   rb_define_method(rb_cValue, "to_s", value_to_s, 0);
   rb_define_method(rb_cValue, "inspect", value_inspect, 0);
   rb_define_method(rb_cValue, "valid?", value_is_valid, 0);
