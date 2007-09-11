@@ -17,9 +17,8 @@ module JIT
       self.function.insn_store(self, value)
     end
 
-    def is_fixnum
-      fixnum_flag = self.function.const(JIT::Type::INT, 1)
-      return self.function.insn_and(self, fixnum_flag)
+    def address
+      return self.function.insn_address_of(self)
     end
 
     def +(rhs)
