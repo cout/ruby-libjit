@@ -45,6 +45,14 @@ module JIT
       return self.function.insn_and(self, rhs)
     end
 
+    def |(rhs)
+      return self.function.insn_or(self, rhs)
+    end
+
+    def ^(rhs)
+      return self.function.insn_xor(self, rhs)
+    end
+
     def <(rhs)
       return self.function.insn_lt(self, rhs)
     end
