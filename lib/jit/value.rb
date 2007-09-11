@@ -30,6 +30,18 @@ module JIT
       return self.function.insn_sub(self, rhs)
     end
 
+    def *(rhs)
+      return self.function.insn_mul(self, rhs)
+    end
+
+    def /(rhs)
+      return self.function.insn_div(self, rhs)
+    end
+
+    def %(rhs)
+      return self.function.insn_rem(self, rhs)
+    end
+
     def &(rhs)
       return self.function.insn_and(self, rhs)
     end
