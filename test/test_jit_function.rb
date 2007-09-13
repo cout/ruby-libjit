@@ -15,7 +15,7 @@ class TestJitFunction < Test::Unit::TestCase
         result.store f.const(JIT::Type::INT, 1)
         f.if(f.get_param(0)) {
           result.store f.const(JIT::Type::INT, 2)
-        }
+        } .end
         f.insn_return result
       end
     end
@@ -35,7 +35,7 @@ class TestJitFunction < Test::Unit::TestCase
         result.store f.const(JIT::Type::INT, 1)
         f.if(f.get_param(0)) {
           result.store f.const(JIT::Type::INT, 2)
-        }
+        } .end
         f.insn_return result
       end
     end
@@ -57,7 +57,7 @@ class TestJitFunction < Test::Unit::TestCase
           result.store f.const(JIT::Type::INT, 2)
         } .else {
           result.store f.const(JIT::Type::INT, 3)
-        }
+        } .end
         f.insn_return result
       end
     end
@@ -79,7 +79,7 @@ class TestJitFunction < Test::Unit::TestCase
           result.store f.const(JIT::Type::INT, 2)
         } .else {
           result.store f.const(JIT::Type::INT, 3)
-        }
+        } .end
         f.insn_return result
       end
     end
@@ -103,7 +103,7 @@ class TestJitFunction < Test::Unit::TestCase
           result.store f.const(JIT::Type::INT, 3)
         } .else {
           result.store f.const(JIT::Type::INT, 4)
-        }
+        } .end
         f.insn_return result
       end
     end
@@ -127,7 +127,7 @@ class TestJitFunction < Test::Unit::TestCase
           result.store f.const(JIT::Type::INT, 3)
         } .else {
           result.store f.const(JIT::Type::INT, 4)
-        }
+        } .end
         f.insn_return result
       end
     end
@@ -151,7 +151,7 @@ class TestJitFunction < Test::Unit::TestCase
           result.store f.const(JIT::Type::INT, 3)
         } .else {
           result.store f.const(JIT::Type::INT, 4)
-        }
+        } .end
         f.insn_return result
       end
     end

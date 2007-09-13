@@ -10,18 +10,20 @@ module JIT
     #     # condition2 is true
     #   } .else {
     #     # condition1 and condition2 are false
-    #   }
+    #   } .end
     #
+    # Caution: if you omit end, then the generated code will have
+    # undefined behavior, but there will be no warning generated.
     def if(cond, end_label = Label.new, &block)
       false_label = Label.new
       insn_branch_if_not(cond, false_label)
       block.call
       insn_branch(end_label)
       insn_label(false_label)
-      return Else.new(self, end_label)
+      return If.new(self, end_label)
     end
 
-    class Else
+    class If
       def initialize(function, end_label)
         @function = function
         @end_label = end_label
@@ -29,12 +31,15 @@ module JIT
 
       def else(&block)
         block.call
-        @function.insn_label(@end_label)
+        return self
       end
 
       def elsif(cond, &block)
-        new_else = @function.if(cond, @end_label, &block)
-        return new_else
+        return @function.if(cond, @end_label, &block)
+      end
+
+      def end
+        @function.insn_label(@end_label)
       end
     end
   end
