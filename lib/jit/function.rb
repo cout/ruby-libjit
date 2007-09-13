@@ -24,7 +24,7 @@ module JIT
     end
 
     def unless(cond, end_label = Label.new, &block)
-      false_label = Label.new
+      true_label = Label.new
       insn_branch_if(cond, true_label)
       block.call
       insn_branch(end_label)
@@ -53,6 +53,25 @@ module JIT
 
       def end
         @function.insn_label(@end_label)
+      end
+    end
+
+    # Usage:
+    #   until(proc { <condition> }) {
+    #   } .end
+    def until(cond, &block)
+      start_label = Label.new
+      done_label = Label.new
+      insn_label(start_label)
+      insn_branch_if(cond.call, done_label)
+      block.call
+      insn_branch(start_label)
+      insn_label(done_label)
+      return Until.new
+    end
+
+    class Until
+      def end
       end
     end
   end
