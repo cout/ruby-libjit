@@ -39,6 +39,8 @@ module JIT
     end
 
     class Instance
+      attr_reader :ptr
+
       def initialize(struct, function, ptr)
         @struct = struct
         @function = function
@@ -51,7 +53,7 @@ module JIT
             end
 
             define_method("#{name}=") do |value|
-              return self[member_name] = value
+              return self[name] = value
             end
           end
         end
