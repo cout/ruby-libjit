@@ -273,6 +273,143 @@ static VALUE function_get_param(VALUE self, VALUE idx)
 
 #include "insns.inc"
 
+static VALUE function_value_klass(VALUE self, VALUE type_v, VALUE klass)
+{
+  jit_function_t function;
+  jit_type_t type;
+  jit_value_t value;
+
+  Data_Get_Struct(self, struct _jit_function, function);
+
+  check_type("type", rb_cType, type_v);
+  Data_Get_Struct(type_v, struct _jit_type, type);
+
+  /* TODO: When we wrap a value, we should inject a reference to the
+   * function in the object, so the function stays around as long as the
+   * value does */
+  value = jit_value_create(function, type);
+  return Data_Wrap_Struct(klass, 0, 0, value);
+}
+
+/*
+ * call-seq:
+ *   value = function.value(type)
+ *
+ * Create a value (placeholder/variable) with the given type.
+ */
+static VALUE function_value(VALUE self, VALUE type_v)
+{
+  return function_value_klass(self, type_v, rb_cValue);
+}
+
+static jit_value_t create_const(jit_function_t function, jit_type_t type, VALUE constant)
+{
+  jit_constant_t c;
+  int kind = jit_type_get_kind(type);
+
+  switch(kind)
+  {
+    case JIT_TYPE_INT:
+    {
+      c.type = type;
+      c.un.int_value = NUM2INT(constant);
+      break;
+    }
+
+    case JIT_TYPE_UINT:
+    {
+      c.type = type;
+      c.un.int_value = NUM2UINT(constant);
+      break;
+    }
+
+    case JIT_TYPE_PTR:
+    {
+      c.type = type;
+      c.un.ptr_value = (void *)NUM2ULONG(constant);
+      break;
+    }
+
+    case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
+    {
+      VALUE value_objects = (VALUE)jit_function_get_meta(function, RJT_VALUE_OBJECTS);
+
+      c.type = type;
+      SET_CONSTANT_VALUE(c, constant);
+
+      /* Make sure the object gets marked as long as the function is
+       * around */
+      /* TODO: not exception-safe */
+      rb_ary_push(value_objects, constant);
+      break;
+    }
+
+    case JIT_TYPE_FIRST_TAGGED + RJT_ID:
+    {
+      c.type = type;
+      SET_CONSTANT_ID(c, SYM2ID(constant));
+      break;
+    }
+
+    default:
+      rb_raise(rb_eTypeError, "Unsupported type");
+  }
+
+  return jit_value_create_constant(function, &c);
+}
+
+/*
+ * call-seq:
+ *   value = function.const(type, constant_value)
+ *
+ * Create a constant value with the given type.
+ */
+static VALUE function_const(VALUE self, VALUE type_v, VALUE constant)
+{
+  jit_function_t function;
+  jit_type_t type;
+  jit_value_t value;
+
+  Data_Get_Struct(self, struct _jit_function, function);
+
+  check_type("type", rb_cType, type_v);
+  Data_Get_Struct(type_v, struct _jit_type, type);
+
+  value = create_const(function, type, constant);
+  return Data_Wrap_Struct(rb_cValue, 0, 0, value);
+}
+
+static void convert_call_args(jit_function_t function, jit_value_t * args, VALUE args_v, jit_type_t signature)
+{
+  int j;
+
+  for(j = 0; j < RARRAY(args_v)->len; ++j)
+  {
+    VALUE value = RARRAY(args_v)->ptr[j];
+    jit_value_t arg;
+
+    jit_type_t type = jit_type_get_param(signature, j);
+    if(!type)
+    {
+      rb_raise(rb_eArgError, "Type missing for param %d", j);
+    }
+
+    if(rb_obj_is_kind_of(value, rb_cValue))
+    {
+      Data_Get_Struct(value, struct _jit_value, arg);
+      if(!arg)
+      {
+        rb_raise(rb_eArgError, "Argument %d is invalid", j);
+      }
+      args[j] = arg;
+    }
+    else
+    {
+      args[j] = create_const(function, type, value);
+    }
+  }
+}
+
 /* 
  * call-seq:
  *   value = function.call(name, called_function, flags, [arg1 [, ... ]])
@@ -290,12 +427,11 @@ static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
 
   char const * name;
   jit_function_t called_function;
+  jit_type_t signature;
   jit_value_t * args;
   jit_value_t retval;
   int flags;
   size_t num_args;
-
-  int j;
 
   rb_scan_args(argc, argv, "3*", &name_v, &called_function_v, &flags_v, &args_v);
 
@@ -309,17 +445,8 @@ static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
   num_args = RARRAY(args_v)->len;
   args = ALLOCA_N(jit_value_t, num_args);
 
-  /* Iterate over all the arguments and unwrap them one by one */
-  for(j = 0; j < num_args; ++j)
-  {
-    jit_value_t arg;
-    Data_Get_Struct(RARRAY(args_v)->ptr[j], struct _jit_value, arg);
-    if(!arg)
-    {
-      rb_raise(rb_eArgError, "Argument %d is invalid", j);
-    }
-    args[j] = arg;
-  }
+  signature = jit_function_get_signature(function);
+  convert_call_args(function, args, args_v, signature);
 
   flags = NUM2INT(flags_v);
 
@@ -352,8 +479,6 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   int flags;
   size_t num_args;
 
-  int j;
-
   rb_scan_args(argc, argv, "4*", &name_v, &function_pointer_v, &signature_v, &flags_v, &args_v);
 
   Data_Get_Struct(self, struct _jit_function, function);
@@ -376,19 +501,8 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
         num_args);
   }
 
-  /* Iterate over all the arguments and unwrap them one by one */
-  for(j = 0; j < num_args; ++j)
-  {
-    jit_value_t arg;
-    VALUE value = RARRAY(args_v)->ptr[j];
-    check_type("argument", rb_cValue, value);
-    Data_Get_Struct(value, struct _jit_value, arg);
-    if(!arg)
-    {
-      rb_raise(rb_eArgError, "Argument %d is invalid", j);
-    }
-    args[j] = arg;
-  }
+  convert_call_args(function, args, args_v, signature);
+
   flags = NUM2INT(flags_v);
 
   retval = jit_insn_call_native(
@@ -549,107 +663,6 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         rb_raise(rb_eTypeError, "Unsupported return type %d", return_kind);
     }
   }
-}
-
-static VALUE function_value_klass(VALUE self, VALUE type_v, VALUE klass)
-{
-  jit_function_t function;
-  jit_type_t type;
-  jit_value_t value;
-
-  Data_Get_Struct(self, struct _jit_function, function);
-
-  check_type("type", rb_cType, type_v);
-  Data_Get_Struct(type_v, struct _jit_type, type);
-
-  /* TODO: When we wrap a value, we should inject a reference to the
-   * function in the object, so the function stays around as long as the
-   * value does */
-  value = jit_value_create(function, type);
-  return Data_Wrap_Struct(klass, 0, 0, value);
-}
-
-/*
- * call-seq:
- *   value = function.value(type)
- *
- * Create a value (placeholder/variable) with the given type.
- */
-static VALUE function_value(VALUE self, VALUE type_v)
-{
-  return function_value_klass(self, type_v, rb_cValue);
-}
-
-/*
- * call-seq:
- *   value = function.const(type, constant_value)
- *
- * Create a constant value with the given type.
- */
-static VALUE function_const(VALUE self, VALUE type_v, VALUE constant)
-{
-  jit_function_t function;
-  jit_type_t type;
-  jit_value_t value;
-  jit_constant_t c;
-  int kind;
-
-  Data_Get_Struct(self, struct _jit_function, function);
-
-  check_type("type", rb_cType, type_v);
-  Data_Get_Struct(type_v, struct _jit_type, type);
-
-  kind = jit_type_get_kind(type);
-  switch(kind)
-  {
-    case JIT_TYPE_INT:
-    {
-      c.type = type;
-      c.un.int_value = NUM2INT(constant);
-      break;
-    }
-
-    case JIT_TYPE_UINT:
-    {
-      c.type = type;
-      c.un.int_value = NUM2UINT(constant);
-      break;
-    }
-
-    case JIT_TYPE_PTR:
-    {
-      c.type = type;
-      c.un.ptr_value = (void *)NUM2ULONG(constant);
-      break;
-    }
-
-    case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
-    {
-      VALUE value_objects = (VALUE)jit_function_get_meta(function, RJT_VALUE_OBJECTS);
-
-      c.type = type;
-      SET_CONSTANT_VALUE(c, constant);
-
-      /* Make sure the object gets marked as long as the function is
-       * around */
-      /* TODO: not exception-safe */
-      rb_ary_push(value_objects, constant);
-      break;
-    }
-
-    case JIT_TYPE_FIRST_TAGGED + RJT_ID:
-    {
-      c.type = type;
-      SET_CONSTANT_ID(c, SYM2ID(constant));
-      break;
-    }
-
-    default:
-      rb_raise(rb_eTypeError, "Unsupported type");
-  }
-
-  value = jit_value_create_constant(function, &c);
-  return Data_Wrap_Struct(rb_cValue, 0, 0, value);
 }
 
 /*
