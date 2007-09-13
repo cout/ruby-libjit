@@ -23,6 +23,15 @@ module JIT
       return If.new(self, end_label)
     end
 
+    def unless(cond, end_label = Label.new, &block)
+      false_label = Label.new
+      insn_branch_if(cond, true_label)
+      block.call
+      insn_branch(end_label)
+      insn_label(true_label)
+      return If.new(self, end_label)
+    end
+
     class If
       def initialize(function, end_label)
         @function = function
@@ -36,6 +45,10 @@ module JIT
 
       def elsif(cond, &block)
         return @function.if(cond, @end_label, &block)
+      end
+
+      def elsunless(cond, &block)
+        return @function.unless(cond, @end_label, &block)
       end
 
       def end
