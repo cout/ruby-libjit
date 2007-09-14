@@ -1104,12 +1104,21 @@ static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE functi
 {
   /* TODO: I think that by using a closure here, we have a memory leak
    * if the method is ever redefined. */
-  char const * name = STR2CSTR(name_v);
+  char const * name;
   jit_function_t function;
   jit_type_t signature;
   int signature_tag;
   int arity;
   void (*closure)();
+
+  if(SYMBOL_P(name_v))
+  {
+    name = rb_id2name(SYM2ID(name_v));
+  }
+  else
+  {
+    name = STR2CSTR(name_v);
+  }
 
   Data_Get_Struct(function_v, struct _jit_function, function);
 
