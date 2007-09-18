@@ -482,7 +482,15 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   rb_scan_args(argc, argv, "4*", &name_v, &function_pointer_v, &signature_v, &flags_v, &args_v);
 
   Data_Get_Struct(self, struct _jit_function, function);
-  name = rb_id2name(SYM2ID(name_v));
+  
+  if(SYMBOL_P(name_v))
+  {
+    name = rb_id2name(SYM2ID(name_v));
+  }
+  else
+  {
+    name = StringValuePtr(name_v);
+  }
 
   function_pointer = (void *)NUM2ULONG(function_pointer_v);
 
