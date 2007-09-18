@@ -74,6 +74,25 @@ module JIT
       def end
       end
     end
+
+    # Usage:
+    #   while(proc { <condition> }) {
+    #   } .end
+    def while(cond, &block)
+      start_label = Label.new
+      done_label = Label.new
+      insn_label(start_label)
+      insn_branch_if_not(cond.call, done_label)
+      block.call
+      insn_branch(start_label)
+      insn_label(done_label)
+      return Until.new
+    end
+
+    class While
+      def end
+      end
+    end
   end
 end
 
