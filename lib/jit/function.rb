@@ -64,14 +64,19 @@ module JIT
       done_label = Label.new
       insn_label(start_label)
       insn_branch_if(cond.call, done_label)
-      block.call
+      result = block.call
       insn_branch(start_label)
       insn_label(done_label)
-      return Until.new
+      return Until.new(result)
     end
 
     class Until
+      def initialize(result)
+        @result = result
+      end
+
       def end
+        return @result
       end
     end
 
@@ -83,14 +88,19 @@ module JIT
       done_label = Label.new
       insn_label(start_label)
       insn_branch_if_not(cond.call, done_label)
-      block.call
+      result = block.call
       insn_branch(start_label)
       insn_label(done_label)
-      return Until.new
+      return While.new(result)
     end
 
     class While
+      def initialize(result)
+        @result = result
+      end
+
       def end
+        return @result
       end
     end
   end
