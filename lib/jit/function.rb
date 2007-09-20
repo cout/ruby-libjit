@@ -64,20 +64,11 @@ module JIT
       done_label = Label.new
       insn_label(start_label)
       insn_branch_if(cond.call, done_label)
-      result = block.call
+      loop = Loop.new(self, start_label, done_label)
+      block.call(loop)
       insn_branch(start_label)
       insn_label(done_label)
-      return Until.new(result)
-    end
-
-    class Until
-      def initialize(result)
-        @result = result
-      end
-
-      def end
-        return @result
-      end
+      return loop
     end
 
     # Usage:
@@ -88,19 +79,34 @@ module JIT
       done_label = Label.new
       insn_label(start_label)
       insn_branch_if_not(cond.call, done_label)
-      result = block.call
+      loop = Loop.new(self, start_label, done_label)
+      block.call(loop)
       insn_branch(start_label)
       insn_label(done_label)
-      return While.new(result)
+      return loop
     end
 
-    class While
-      def initialize(result)
-        @result = result
+    class Loop
+      def initialize(function, start_label, done_label)
+        @function = function
+        @redo_label = start_label
+        @done_label = done_label
       end
 
       def end
-        return @result
+      end
+
+      def break
+        @function.insn_branch(@done_label)
+      end
+
+      def redo
+        @function.insn_branch(@redo_label)
+      end
+
+      def redo_from_here
+        @redo_label = JIT::Label.new
+        @function.insn_label(@redo_label)
       end
     end
   end
