@@ -720,6 +720,7 @@ static VALUE function_max_optimization_level(VALUE klass)
  */
 static VALUE function_dump(VALUE self)
 {
+#ifdef HAVE_FMEMOPEN
   jit_function_t function;
   char buf[16*1024]; /* TODO: big enough? */
   FILE * fp = fmemopen(buf, sizeof(buf), "w");
@@ -727,6 +728,9 @@ static VALUE function_dump(VALUE self)
   jit_dump_function(fp, function, 0);
   fclose(fp);
   return rb_str_new2(buf);
+#else
+  rb_raise(rb_eNotImpError, "Not implemented: missing fmemopen");
+#endif
 }
 
 /*
@@ -913,6 +917,7 @@ static VALUE value_s_new_value(VALUE klass, VALUE function, VALUE type)
  */
 static VALUE value_to_s(VALUE self)
 {
+#ifdef HAVE_FMEMOPEN
   /* TODO: We shouldn't depend on glibc */
   char buf[1024];
   FILE * fp = fmemopen(buf, sizeof(buf), "w");
@@ -923,6 +928,9 @@ static VALUE value_to_s(VALUE self)
   jit_dump_value(fp, function, value, 0);
   fclose(fp);
   return rb_str_new2(buf);
+#else
+  rb_raise(rb_eNotImpError, "Not implemented: missing fmemopen");
+#endif
 }
 
 /*

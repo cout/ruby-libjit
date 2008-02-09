@@ -5,6 +5,8 @@ if not have_library('jit', 'jit_init', []) then
   exit 1
 end
 
+have_func('fmemopen')
+
 rb_files = Dir['*.rb']
 rpp_files = Dir['*.rpp']
 generated_files = rpp_files.map { |f| f.sub(/\.rpp$/, '') }
@@ -42,9 +44,9 @@ clean: clean_generated_files
 clean_generated_files:
 	@$(RM) #{generated_files.join(' ')}
 
-install: rubyjit.h
 install: $(includedir)/rubyjit.h
-$(includedir)/rubyjit.h:
+
+$(includedir)/rubyjit.h: rubyjit.h
 	$(INSTALL_PROG) rubyjit.h $(includedir)
 END
 
