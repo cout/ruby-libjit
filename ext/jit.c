@@ -359,7 +359,6 @@ static jit_value_t create_const(jit_function_t function, jit_type_t type, VALUE 
 
       /* Make sure the object gets marked as long as the function is
        * around */
-      /* TODO: not exception-safe */
       rb_ary_push(value_objects, constant);
       break;
     }
@@ -573,7 +572,7 @@ static VALUE function_insn_return(int argc, VALUE * argv, VALUE self)
  * to the type specified by the function's signature.
  *
  * If the function's signature is Type::RUBY_VARARG_SIGNATURE, then the
- * arguments will be passed in the the first parameter the count of the
+ * arguments will be passed in with the first parameter the count of the
  * number of arguments, the second parameter a pointer to an array
  * containing the second through the last argument, and the third
  * parameter the explicit self (that is, the first argument passed to
@@ -603,8 +602,15 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   signature_tag = (int)jit_function_get_meta(function, RJT_TAG_FOR_SIGNATURE);
   if(signature_tag == JIT_TYPE_FIRST_TAGGED + RJT_RUBY_VARARG_SIGNATURE)
   {
-    /* TODO: validate the number of args passed in (should be at least
-     * 1) */
+    if(argc != n + 1)
+    {
+      rb_raise(
+          rb_eArgError,
+          "Wrong number of arguments (expected %d but got %d)",
+          n + 1,
+          argc);
+    }
+
     jit_uint result;
     int f_argc = argc - 1;
     VALUE f_self = *(VALUE *)argv;
@@ -617,7 +623,15 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
     return result;
   }
 
-  /* TODO: validate the number of args passed in */
+  if(argc != n)
+  {
+    rb_raise(
+        rb_eArgError,
+        "Wrong number of arguments (expected %d but got %d)",
+        n,
+        argc);
+  }
+
   for(j = 0; j < n; ++j)
   {
     jit_type_t arg_type = jit_type_get_param(signature, j);
