@@ -1,7 +1,5 @@
 require 'jit'
 require 'benchmark'
-require 'ruby2jit'
-
 
 # GCD, JIT-compiled
 
