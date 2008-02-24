@@ -5,6 +5,9 @@ if not have_library('jit', 'jit_init', []) then
   exit 1
 end
 
+check_sizeof("VALUE", "ruby.h")
+check_sizeof("ID", "ruby.h")
+
 have_func('fmemopen')
 
 rb_files = Dir['*.rb']

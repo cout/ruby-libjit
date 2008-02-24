@@ -28,13 +28,33 @@ static jit_type_t ruby_vararg_signature;
  * is never removed from this array */
 static VALUE libjit_closure_functions;
 
-/* TODO: this might not be right for 64-bit systems */
+#if SIZEOF_VALUE == 4
+/* 32-bit */
 typedef jit_uint jit_VALUE;
 #define jit_underlying_type_VALUE jit_type_uint
 #define SET_CONSTANT_VALUE(c, v) c.un.uint_value = v;
+#elif SIZEOF_VALUE == 8
+/* 64-bit */
+typedef jit_ulong jit_VALUE;
+#define jit_underlying_type_VALUE jit_type_ulong
+#define SET_CONSTANT_VALUE(c, v) c.un.ulong_value = v;
+#else
+#error "Unsupported size for VALUE"
+#endif
+
+#if SIZEOF_ID == 4
+/* 32-bit */
 typedef jit_uint jit_ID;
 #define jit_underlying_type_ID jit_type_uint
 #define SET_CONSTANT_ID(c, v) c.un.uint_value = v;
+#elif SIZEOF_ID == 8
+/* 64-bit */
+typedef jit_ulong jit_ID;
+#define jit_underlying_type_ID jit_type_ulong
+#define SET_CONSTANT_ID(c, v) c.un.ulong_value = v;
+#else
+#error "Unsupported size for ID"
+#endif
 
 static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 {
