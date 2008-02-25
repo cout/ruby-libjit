@@ -1,7 +1,15 @@
 #include "method_data.h"
 
+#include <ruby.h>
+
+#ifdef RUBY_VM
+/* YARV */
+#error This code does not work on YARV
+#else
+/* pre-YARV */
 #include <node.h>
 #include <env.h>
+#endif
 
 typedef VALUE (*Method_Func)(ANYARGS);
 
@@ -145,7 +153,11 @@ void define_method_with_data(
   }
 
   FL_SET(origin, FL_SINGLETON);
+  rb_singleton_class_attached(origin, klass);
+  rb_name_class(origin, SYM2ID(rb_class_name(klass)));
+
   node = NEW_FBODY(NEW_CFUNC(data_wrapper, arity), id, origin);
+
   RBASIC(origin)->klass = (VALUE)NEW_NODE(NODE_MEMO, cfunc, data, 0);
   rb_add_method(klass, id, node, NOEX_PUBLIC);
 }
