@@ -3,9 +3,11 @@
 
 #include <jit/jit.h>
 #include <jit/jit-dump.h>
+
 #include <ruby.h>
 
 #include "rubyjit.h"
+#include "method_data.h"
 
 static VALUE rb_mJIT;
 static VALUE rb_cContext;
@@ -15,29 +17,32 @@ static VALUE rb_mABI;
 static VALUE rb_cValue;
 static VALUE rb_cLabel;
 static VALUE rb_mCall;
+static VALUE rb_cClosure;
 
 static jit_type_t jit_type_VALUE;
 static jit_type_t jit_type_ID;
+static jit_type_t jit_type_Function_Ptr;
 
 static jit_type_t ruby_vararg_signature;
 
-/* TODO: There's no good way once we create a closure to know when we're
- * done with it.  This is to keep the function around as long as the
- * closure is -- which is necessary to prevent the app from crashing --
- * but the result is that the function is permanently around, since it
- * is never removed from this array */
-static VALUE libjit_closure_functions;
+typedef void (*Void_Function_Ptr)();
+
+struct Closure
+{
+  VALUE function;
+  Void_Function_Ptr function_ptr;
+};
 
 #if SIZEOF_VALUE == 4
 /* 32-bit */
 typedef jit_uint jit_VALUE;
 #define jit_underlying_type_VALUE jit_type_uint
-#define SET_CONSTANT_VALUE(c, v) c.un.uint_value = v;
+#define SET_CONSTANT_VALUE(c, v) (c.un.uint_value = v)
 #elif SIZEOF_VALUE == 8
 /* 64-bit */
 typedef jit_ulong jit_VALUE;
 #define jit_underlying_type_VALUE jit_type_ulong
-#define SET_CONSTANT_VALUE(c, v) c.un.ulong_value = v;
+#define SET_CONSTANT_VALUE(c, v) (c.un.ulong_value = v)
 #else
 #error "Unsupported size for VALUE"
 #endif
@@ -46,15 +51,24 @@ typedef jit_ulong jit_VALUE;
 /* 32-bit */
 typedef jit_uint jit_ID;
 #define jit_underlying_type_ID jit_type_uint
-#define SET_CONSTANT_ID(c, v) c.un.uint_value = v;
+#define SET_CONSTANT_ID(c, v) (c.un.uint_value = v)
 #elif SIZEOF_ID == 8
 /* 64-bit */
 typedef jit_ulong jit_ID;
 #define jit_underlying_type_ID jit_type_ulong
-#define SET_CONSTANT_ID(c, v) c.un.ulong_value = v;
+#define SET_CONSTANT_ID(c, v) (c.un.ulong_value = v)
 #else
 #error "Unsupported size for ID"
 #endif
+
+typedef jit_ptr jit_Function_Ptr;
+#define jit_underlying_type_void_ptr jit_type_void_ptr
+#define SET_FUNCTION_POINTER_VALUE(c, v) (c.un.ptr_value = v)
+
+/* ---------------------------------------------------------------------------
+ * Utility functions
+ * ---------------------------------------------------------------------------
+ */
 
 static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 {
@@ -129,6 +143,41 @@ static VALUE context_build(VALUE self)
 static VALUE context_s_build(VALUE klass)
 {
   return context_build(context_s_new(klass));
+}
+
+/* ---------------------------------------------------------------------------
+ * Closure
+ * ---------------------------------------------------------------------------
+ */
+
+static void mark_closure(struct Closure * closure)
+{
+  rb_gc_mark(closure->function);
+}
+
+VALUE closure_to_int(VALUE self)
+{
+  struct Closure * closure;
+  Data_Get_Struct(self, struct Closure, closure);
+  VALUE v = ULONG2NUM((unsigned long)closure->function_ptr);
+  return v;
+}
+
+VALUE closure_to_s(VALUE self)
+{
+  struct Closure * closure;
+  VALUE args[4];
+  Data_Get_Struct(self, struct Closure, closure);
+  args[0] = rb_str_new2("#<JIT::Closure:0x%x function=%s function_ptr=0x%x>");
+  args[1] = ULONG2NUM(self);
+  args[2] = rb_any_to_s(closure->function);
+  args[3] = ULONG2NUM((unsigned long)closure->function_ptr);
+  return rb_f_sprintf(sizeof(args)/sizeof(args[0]), args);
+}
+
+VALUE closure_inspect(VALUE self)
+{
+  return closure_to_s(self);
 }
 
 /* ---------------------------------------------------------------------------
@@ -370,6 +419,15 @@ static jit_value_t create_const(jit_function_t function, jit_type_t type, VALUE 
       break;
     }
 
+    case JIT_TYPE_FIRST_TAGGED + RJT_FUNCTION_PTR:
+    {
+      c.type = type;
+      SET_FUNCTION_POINTER_VALUE(
+          c,
+          (Void_Function_Ptr)NUM2ULONG(rb_to_int(constant)));
+      break;
+    }
+
     default:
       rb_raise(rb_eTypeError, "Unsupported type");
   }
@@ -486,19 +544,19 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
 
   VALUE name_v;
   VALUE args_v;
-  VALUE function_pointer_v;
+  VALUE function_ptr_v;
   VALUE signature_v;
   VALUE flags_v;
 
   char const * name;
   jit_value_t * args;
   jit_value_t retval;
-  void * function_pointer;
+  void * function_ptr;
   jit_type_t signature;
   int flags;
   size_t num_args;
 
-  rb_scan_args(argc, argv, "4*", &name_v, &function_pointer_v, &signature_v, &flags_v, &args_v);
+  rb_scan_args(argc, argv, "4*", &name_v, &function_ptr_v, &signature_v, &flags_v, &args_v);
 
   Data_Get_Struct(self, struct _jit_function, function);
   
@@ -511,7 +569,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
     name = StringValuePtr(name_v);
   }
 
-  function_pointer = (void *)NUM2ULONG(function_pointer_v);
+  function_ptr = (void *)NUM2ULONG(function_ptr_v);
 
   Data_Get_Struct(signature_v, struct _jit_type, signature);
 
@@ -533,7 +591,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   flags = NUM2INT(flags_v);
 
   retval = jit_insn_call_native(
-      function, name, function_pointer, signature, args, num_args, flags);
+      function, name, function_ptr, signature, args, num_args, flags);
   return Data_Wrap_Struct(rb_cValue, 0, 0, retval);
 }
 
@@ -602,15 +660,6 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   signature_tag = (int)jit_function_get_meta(function, RJT_TAG_FOR_SIGNATURE);
   if(signature_tag == JIT_TYPE_FIRST_TAGGED + RJT_RUBY_VARARG_SIGNATURE)
   {
-    if(argc != n + 1)
-    {
-      rb_raise(
-          rb_eArgError,
-          "Wrong number of arguments (expected %d but got %d)",
-          n + 1,
-          argc);
-    }
-
     jit_uint result;
     int f_argc = argc - 1;
     VALUE f_self = *(VALUE *)argv;
@@ -670,6 +719,15 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         break;
       }
 
+      case JIT_TYPE_FIRST_TAGGED + RJT_FUNCTION_PTR:
+      {
+        *(Void_Function_Ptr *)arg_data =
+          (Void_Function_Ptr)NUM2ULONG(rb_to_int(argv[j]));
+        args[j] = (Void_Function_Ptr *)(arg_data);
+        arg_data += sizeof(Void_Function_Ptr);
+        break;
+      }
+
       default:
         rb_raise(rb_eTypeError, "Unsupported type %d", kind);
     }
@@ -689,14 +747,14 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
 
       case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
       {
-        jit_uint result;
+        jit_VALUE result;
         jit_function_apply(function, args, &result);
         return result;
       }
 
       case JIT_TYPE_FIRST_TAGGED + RJT_ID:
       {
-        jit_uint result;
+        jit_ID result;
         jit_function_apply(function, args, &result);
         return ID2SYM(result);
       }
@@ -777,11 +835,14 @@ static VALUE function_dump(VALUE self)
 static VALUE function_to_closure(VALUE self)
 {
   jit_function_t function;
-  void * closure;
+  struct Closure * closure;
+  VALUE closure_v = Data_Make_Struct(
+      rb_cClosure, struct Closure, mark_closure, free, closure);
   Data_Get_Struct(self, struct _jit_function, function);
-  closure = jit_function_to_closure(function);
-  rb_ary_push(libjit_closure_functions, self);
-  return ULONG2NUM((unsigned long)closure);
+  closure->function = self;
+  closure->function_ptr =
+    (Void_Function_Ptr)jit_function_to_closure(function);
+  return closure_v;
 }
 
 /*
@@ -952,7 +1013,6 @@ static VALUE value_s_new_value(VALUE klass, VALUE function, VALUE type)
 static VALUE value_to_s(VALUE self)
 {
 #ifdef HAVE_FMEMOPEN
-  /* TODO: We shouldn't depend on glibc */
   char buf[1024];
   FILE * fp = fmemopen(buf, sizeof(buf), "w");
   jit_value_t value;
@@ -982,7 +1042,7 @@ static VALUE value_inspect(VALUE self)
   VALUE args[6];
   Data_Get_Struct(self, struct _jit_value, value);
   type = jit_value_get_type(value);
-  args[0] = rb_str_new2("<%s:0x%x %s ptr=0x%x type=0x%x>");
+  args[0] = rb_str_new2("#<%s:0x%x %s ptr=0x%x type=0x%x>");
   args[1] = rb_str_new2(cname);
   args[2] = ULONG2NUM(self);
   args[3] = value_to_s(self);
@@ -1152,14 +1212,13 @@ static VALUE label_s_new(VALUE klass)
  */
 static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE function_v)
 {
-  /* TODO: I think that by using a closure here, we have a memory leak
-   * if the method is ever redefined. */
   char const * name;
   jit_function_t function;
   jit_type_t signature;
   int signature_tag;
   int arity;
-  void (*closure)();
+  VALUE closure_v;
+  struct Closure * closure;
 
   if(SYMBOL_P(name_v))
   {
@@ -1183,9 +1242,11 @@ static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE functi
     arity = jit_type_num_params(signature) - 1;
   }
 
-  closure = jit_function_to_closure(function);
-  rb_ary_push(libjit_closure_functions, function_v);
-  rb_define_method(klass, name, RUBY_METHOD_FUNC(closure), arity);
+  closure_v = function_to_closure(function_v);
+  Data_Get_Struct(closure_v, struct Closure, closure);
+  define_method_with_data(
+      klass, rb_intern(name), RUBY_METHOD_FUNC(closure->function_ptr),
+      arity, closure_v);
   return Qnil;
 }
 
@@ -1204,6 +1265,11 @@ void Init_jit()
   rb_define_singleton_method(rb_cContext, "new", context_s_new, 0);
   rb_define_method(rb_cContext, "build", context_build, 0);
   rb_define_singleton_method(rb_cContext, "build", context_s_build, 0);
+
+  rb_cClosure = rb_define_class_under(rb_mJIT, "Closure", rb_cObject);
+  rb_define_method(rb_cClosure, "to_int", closure_to_int, 0);
+  rb_define_method(rb_cClosure, "to_s", closure_to_s, 0);
+  rb_define_method(rb_cClosure, "inspect", closure_inspect, 0);
 
   rb_cFunction = rb_define_class_under(rb_mJIT, "Function", rb_cObject);
   rb_define_singleton_method(rb_cFunction, "new", function_s_new, -1);
@@ -1254,6 +1320,9 @@ void Init_jit()
   jit_type_ID = jit_type_create_tagged(jit_underlying_type_ID, RJT_ID, 0, 0, 1);
   rb_define_const(rb_cType, "ID", wrap_type(jit_type_ID));
 
+  jit_type_Function_Ptr = jit_type_create_tagged(jit_underlying_type_ID, RJT_FUNCTION_PTR, 0, 0, 1);
+  rb_define_const(rb_cType, "FUNCTION_PTR", wrap_type(jit_type_Function_Ptr));
+
   {
     jit_type_t ruby_vararg_param_types[3];
     jit_type_t ruby_vararg_signature_untagged;
@@ -1300,8 +1369,5 @@ void Init_jit()
 
   /* VALUE rb_cModule = rb_define_module(); */
   rb_define_method(rb_cModule, "define_libjit_method", module_define_libjit_method, 2);
-
-  libjit_closure_functions = rb_ary_new();
-  rb_gc_register_address(&libjit_closure_functions);
 }
 

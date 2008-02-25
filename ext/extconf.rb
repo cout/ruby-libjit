@@ -7,7 +7,7 @@ end
 
 check_sizeof("VALUE", "ruby.h")
 check_sizeof("ID", "ruby.h")
-
+have_func("rb_class_boot", "ruby.h")
 have_func('fmemopen')
 
 rb_files = Dir['*.rb']
