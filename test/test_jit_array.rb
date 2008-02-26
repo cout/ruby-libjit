@@ -7,15 +7,9 @@ class TestJitArray < Test::Unit::TestCase
   include JitAssertions
 
   def test_new_array
-    p = proc { |f|
-      a_type = JIT::Array.new(JIT::Type::INT, 12)
-      assert_equal JIT::Type::INT, a_type.type
-      assert_equal 12, a_type.length
-      f.return f.const(JIT::Type::INT, 0)
-    }
-    assert_function_result(
-        :result => [ JIT::Type::INT, 0 ],
-        &p)
+    a_type = JIT::Array.new(JIT::Type::INT, 12)
+    assert_equal JIT::Type::INT, a_type.type
+    assert_equal 12, a_type.length
   end
 
   # TODO: wrap
@@ -32,33 +26,21 @@ class TestJitArray < Test::Unit::TestCase
   end
 
   def test_offset_of
-    p = proc { |f|
-      a_type = JIT::Array.new(JIT::Type::INT, 4)
-      assert_equal 0, a_type.offset_of(0)
-      assert_equal 4, a_type.offset_of(1)
-      assert_equal 8, a_type.offset_of(2)
-      assert_equal 12, a_type.offset_of(3)
-      # TODO: check out of bounds
-      f.return f.const(JIT::Type::INT, 0)
-    }
-    assert_function_result(
-        :result => [ JIT::Type::INT, 0 ],
-        &p)
+    a_type = JIT::Array.new(JIT::Type::INT, 4)
+    assert_equal 0, a_type.offset_of(0)
+    assert_equal 4, a_type.offset_of(1)
+    assert_equal 8, a_type.offset_of(2)
+    assert_equal 12, a_type.offset_of(3)
+    # TODO: check out of bounds
   end
 
   def test_type_of
-    p = proc { |f|
-      a_type = JIT::Array.new(JIT::Type::INT, 4)
-      assert_equal JIT::Type::INT, a_type.type_of(0)
-      assert_equal JIT::Type::INT, a_type.type_of(1)
-      assert_equal JIT::Type::INT, a_type.type_of(2)
-      assert_equal JIT::Type::INT, a_type.type_of(3)
-      # TODO: check out of bounds
-      f.return f.const(JIT::Type::INT, 0)
-    }
-    assert_function_result(
-        :result => [ JIT::Type::INT, 0 ],
-        &p)
+    a_type = JIT::Array.new(JIT::Type::INT, 4)
+    assert_equal JIT::Type::INT, a_type.type_of(0)
+    assert_equal JIT::Type::INT, a_type.type_of(1)
+    assert_equal JIT::Type::INT, a_type.type_of(2)
+    assert_equal JIT::Type::INT, a_type.type_of(3)
+    # TODO: check out of bounds
   end
 
   def test_instance_bracket
