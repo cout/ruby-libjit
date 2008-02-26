@@ -392,6 +392,20 @@ static jit_value_t create_const(jit_function_t function, jit_type_t type, VALUE 
       break;
     }
 
+    case JIT_TYPE_FLOAT32:
+    {
+      c.type = type;
+      c.un.float32_value = NUM2DBL(constant);
+      break;
+    }
+
+    case JIT_TYPE_FLOAT64:
+    {
+      c.type = type;
+      c.un.float64_value = NUM2DBL(constant);
+      break;
+    }
+
     case JIT_TYPE_PTR:
     {
       c.type = type;
@@ -743,6 +757,20 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
         jit_int result;
         jit_function_apply(function, args, &result);
         return INT2NUM(result);
+      }
+
+      case JIT_TYPE_FLOAT32:
+      {
+        jit_float32 result;
+        jit_function_apply(function, args, &result);
+        return rb_float_new(result);
+      }
+
+      case JIT_TYPE_FLOAT64:
+      {
+        jit_float64 result;
+        jit_function_apply(function, args, &result);
+        return rb_float_new(result);
       }
 
       case JIT_TYPE_FIRST_TAGGED + RJT_OBJECT:
