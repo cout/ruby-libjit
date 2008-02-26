@@ -109,6 +109,10 @@ module JIT
         @function.insn_label(@redo_label)
       end
     end
+
+    def return(result)
+      self.insn_return(result)
+    end
   end
 end
 
