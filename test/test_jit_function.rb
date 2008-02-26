@@ -285,5 +285,45 @@ class TestJitFunction < Test::Unit::TestCase
   # TODO: until/redo
   # TODO: unless
   # TODO: elsunless
+
+  def test_define_jit_method
+    function = nil
+    JIT::Context.build do |context|
+      signature = JIT::Type.create_signature(
+          JIT::ABI::CDECL,
+          JIT::Type::OBJECT,
+          [ JIT::Type::OBJECT ])
+      function = JIT::Function.compile(context, signature) do |f|
+        f.insn_return(f.const(JIT::Type::OBJECT, 42))
+      end
+    end
+
+    c = Class.new
+    c.instance_eval do
+      define_jit_method('foo', function)
+    end
+
+    o = c.new
+    assert_equal 42, o.foo
+  end
+
+  def test_define_jit_method_non_object_param
+    # TODO: should raise an exception
+  end
+
+  # TODO: get_param
+  # TODO: insn_call
+  # TODO: insn_call_native
+  # TODO: insn_return
+  # TODO: apply
+  # TODO: value
+  # TODO: const
+  # TODO: optimization_level
+  # TODO: optimization_level=
+  # TODO: max_optimization_level
+  # TODO: dump
+  # TODO: to_closure
+  # TODO: context
+  # TODO: compiled?
 end
 

@@ -1228,7 +1228,7 @@ static VALUE label_s_new(VALUE klass)
 
 /*
  * call-seq:
- *   module.define_libjit_method(name, function)
+ *   module.define_jit_method(name, function)
  *
  * Use a Function to define an instance method on a module.  The
  * function should have one of two signatures:
@@ -1238,7 +1238,7 @@ static VALUE label_s_new(VALUE klass)
  *
  * * The function's signature should be Type::RUBY_VARARG_SIGNATURE.
  */
-static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE function_v)
+static VALUE module_define_jit_method(VALUE klass, VALUE name_v, VALUE function_v)
 {
   char const * name;
   jit_function_t function;
@@ -1267,6 +1267,7 @@ static VALUE module_define_libjit_method(VALUE klass, VALUE name_v, VALUE functi
   }
   else
   {
+    /* TODO: check the types to make sure they are OBJECT */
     arity = jit_type_num_params(signature) - 1;
   }
 
@@ -1396,6 +1397,6 @@ void Init_jit()
   rb_define_const(rb_mCall, "TAIL", INT2NUM(JIT_CALL_TAIL));
 
   /* VALUE rb_cModule = rb_define_module(); */
-  rb_define_method(rb_cModule, "define_libjit_method", module_define_libjit_method, 2);
+  rb_define_method(rb_cModule, "define_jit_method", module_define_jit_method, 2);
 }
 
