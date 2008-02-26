@@ -275,6 +275,8 @@ class TestJitFunction < Test::Unit::TestCase
         f.insn_return false_value
       end
     end
+
+      assert_equal(0, function.apply)
   end
 
   # TODO: while/break
