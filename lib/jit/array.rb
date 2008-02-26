@@ -3,13 +3,16 @@ require 'jit/value'
 
 module JIT
   class Array < JIT::Type
+    attr_reader :type
+    attr_reader :length
+
     def self.new(type, length)
-      type = self.create_struct([ type ] * length)
-      type.instance_eval do
+      array = self.create_struct([ type ] * length)
+      array.instance_eval do
         @type = type
         @length = length
       end
-      return type
+      return array
     end
 
     def wrap(function, ptr)
@@ -31,13 +34,20 @@ module JIT
     end
 
     class Instance < JIT::Value
-      def self.wrap(struct, function, ptr)
-        pointer_type = JIT::Type.create_pointer(struct)
+      attr_reader :array_type
+      attr_reader :type
+      attr_reader :ptr
+
+      # TODO: This breaks code below?
+      # attr_reader :function
+
+      def self.wrap(array_type, function, ptr)
+        pointer_type = JIT::Type.create_pointer(array_type)
         value = self.new_value(function, pointer_type)
         value.store(ptr)
-        value.set_stuff(struct, function, ptr)
         value.instance_eval do
-          @struct = struct
+          @array_type = array_type
+          @type = array_type.type
           @function = function
           @ptr = ptr
         end
@@ -47,14 +57,14 @@ module JIT
       def [](index)
         @function.insn_load_relative(
             @ptr,
-            @struct.offset_of(index),
-            @struct.type_of(index))
+            @array_type.offset_of(index),
+            @array_type.type_of(index))
       end
 
       def []=(index, value)
         @function.insn_store_relative(
             @ptr,
-            @struct.offset_of(index),
+            @array_type.offset_of(index),
             value)
       end
     end
