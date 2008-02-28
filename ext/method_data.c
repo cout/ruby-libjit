@@ -88,6 +88,15 @@ static VALUE data_wrapper_5(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3, VALU
   return result;
 }
 
+static VALUE data_wrapper_6(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3, VALUE arg4, VALUE arg5, VALUE arg6)
+{
+  VALUE result;
+  FIX_FRAME();
+  result = (*actual_cfunc())(self, arg1, arg2, arg3, arg4, arg5, arg6);
+  return result;
+}
+
+
 /* Define a method and attach data to it.
  *
  * The method looks to ruby like a normal aliased CFUNC, with a modified
@@ -148,6 +157,7 @@ void define_method_with_data(
     case 3: data_wrapper = data_wrapper_3; break;
     case 4: data_wrapper = data_wrapper_4; break;
     case 5: data_wrapper = data_wrapper_5; break;
+    case 6: data_wrapper = data_wrapper_6; break;
     case -1: data_wrapper = data_wrapper_m1; break;
     default: rb_raise(rb_eArgError, "unsupported arity %d", arity);
   }
