@@ -10,6 +10,7 @@ module JIT
         @members = members
         @member_names = member_names
         @member_types = member_types
+        @index = Hash[*@member_names.zip((0..@member_names.size).to_a).flatten]
       end
       return type
     end
@@ -30,12 +31,12 @@ module JIT
 
     def offset_of(name)
       name = (Symbol === name) ? name : name.to_s.intern
-      return self.get_offset(@member_names.index(name))
+      return self.get_offset(@index[name])
     end
 
     def type_of(name)
       name = (Symbol === name) ? name : name.to_s.intern
-      return @member_types[@member_names.index(name)]
+      return @member_types[@index[name]]
     end
 
     class Instance
