@@ -48,54 +48,24 @@ static VALUE data_wrapper_0(VALUE self)
   return result;
 }
 
-static VALUE data_wrapper_1(VALUE self, VALUE arg1)
+#ruby <<END
+  (1..15).each do |i|
+    params = (1..i).map { |i| "VALUE arg#{i}" }.join(', ')
+    args = (1..i).map { |i| "arg#{i}" }.join(', ')
+
+    puts <<-END
+static VALUE data_wrapper_#{i}(VALUE self, #{params})
 {
   VALUE result;
   FIX_FRAME();
-  result = (*actual_cfunc())(self, arg1);
+  result = (*actual_cfunc())(self, #{args});
   return result;
 }
+    END
+  end
 
-static VALUE data_wrapper_2(VALUE self, VALUE arg1, VALUE arg2)
-{
-  VALUE result;
-  FIX_FRAME();
-  result = (*actual_cfunc())(self, arg1, arg2);
-  return result;
-}
-
-static VALUE data_wrapper_3(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3)
-{
-  VALUE result;
-  FIX_FRAME();
-  result = (*actual_cfunc())(self, arg1, arg2, arg3);
-  return result;
-}
-
-static VALUE data_wrapper_4(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3, VALUE arg4)
-{
-  VALUE result;
-  FIX_FRAME();
-  result = (*actual_cfunc())(self, arg1, arg2, arg3, arg4);
-  return result;
-}
-
-static VALUE data_wrapper_5(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3, VALUE arg4, VALUE arg5)
-{
-  VALUE result;
-  FIX_FRAME();
-  result = (*actual_cfunc())(self, arg1, arg2, arg3, arg4, arg5);
-  return result;
-}
-
-static VALUE data_wrapper_6(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3, VALUE arg4, VALUE arg5, VALUE arg6)
-{
-  VALUE result;
-  FIX_FRAME();
-  result = (*actual_cfunc())(self, arg1, arg2, arg3, arg4, arg5, arg6);
-  return result;
-}
-
+  nil
+END
 
 /* Define a method and attach data to it.
  *
@@ -151,13 +121,15 @@ void define_method_with_data(
   VALUE (*data_wrapper)(ANYARGS);
   switch(arity)
   {
-    case 0: data_wrapper = data_wrapper_0; break;
-    case 1: data_wrapper = data_wrapper_1; break;
-    case 2: data_wrapper = data_wrapper_2; break;
-    case 3: data_wrapper = data_wrapper_3; break;
-    case 4: data_wrapper = data_wrapper_4; break;
-    case 5: data_wrapper = data_wrapper_5; break;
-    case 6: data_wrapper = data_wrapper_6; break;
+#ruby <<END
+    (0..15).each do |i|
+      puts <<-END
+    case #{i}: data_wrapper = data_wrapper_#{i}; break;
+      END
+    end
+
+    nil
+END
     case -1: data_wrapper = data_wrapper_m1; break;
     default: rb_raise(rb_eArgError, "unsupported arity %d", arity);
   }
