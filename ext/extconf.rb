@@ -5,9 +5,16 @@ if not have_library('jit', 'jit_init', []) then
   exit 1
 end
 
-check_sizeof("VALUE", "ruby.h")
-check_sizeof("ID", "ruby.h")
+if not have_macro("SIZEOF_VALUE", "ruby.h") then
+  check_sizeof("VALUE", "ruby.h")
+end
+
+if not have_macro("SIZEOF_ID", "ruby.h") then
+  check_sizeof("ID", "ruby.h")
+end
+
 have_func("rb_class_boot", "ruby.h")
+have_func("rb_errinfo", "ruby.h")
 have_func('fmemopen')
 
 rb_files = Dir['*.rb']
