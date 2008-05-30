@@ -65,6 +65,10 @@ typedef jit_ptr jit_Function_Ptr;
 #define jit_underlying_type_void_ptr jit_type_void_ptr
 #define SET_FUNCTION_POINTER_VALUE(c, v) (c.un.ptr_value = v)
 
+#ifdef HAVE_RB_ERRINFO
+#define ruby_errinfo rb_errinfo()
+#endif
+
 /* ---------------------------------------------------------------------------
  * Utility functions
  * ---------------------------------------------------------------------------
