@@ -2,6 +2,11 @@
 
 #include <ruby.h>
 
+#ruby <<END
+MAX_ARGS = 15
+nil
+END
+
 #ifdef RUBY_VM
 /* YARV */
 #include <ruby/node.h>
@@ -36,7 +41,6 @@ typedef struct rb_thread_struct rb_thread_t;
  */
 #define FIX_FRAME() \
   do { \
-    volatile NODE * memo_node = RBASIC(CFP_METHOD_CLASS)->klass; \
     extern rb_thread_t * ruby_current_thread; \
     VALUE * cfp = ruby_current_thread->cfp; \
     CFP_DATA_MEMO_NODE_AND_PC = RBASIC(CFP_METHOD_CLASS)->klass; \
@@ -94,7 +98,7 @@ static VALUE data_wrapper_0(VALUE self)
 }
 
 #ruby <<END
-  (1..15).each do |i|
+  (1..MAX_ARGS).each do |i|
     params = (1..i).map { |j| "VALUE arg#{j}" }.join(', ')
     args = (1..i).map { |j| "arg#{j}" }.join(', ')
 
@@ -203,23 +207,15 @@ void define_method_with_data(
   VALUE (*data_wrapper)(ANYARGS);
   switch(arity)
   {
-    case 0: data_wrapper = data_wrapper_0; break;
-    case 1: data_wrapper = data_wrapper_1; break;
-    case 2: data_wrapper = data_wrapper_2; break;
-    case 3: data_wrapper = data_wrapper_3; break;
-    case 4: data_wrapper = data_wrapper_4; break;
-    case 5: data_wrapper = data_wrapper_5; break;
-    case 6: data_wrapper = data_wrapper_6; break;
-    case 7: data_wrapper = data_wrapper_7; break;
-    case 8: data_wrapper = data_wrapper_8; break;
-    case 9: data_wrapper = data_wrapper_9; break;
-    case 10: data_wrapper = data_wrapper_10; break;
-    case 11: data_wrapper = data_wrapper_11; break;
-    case 12: data_wrapper = data_wrapper_12; break;
-    case 13: data_wrapper = data_wrapper_13; break;
-    case 14: data_wrapper = data_wrapper_14; break;
-    case 15: data_wrapper = data_wrapper_15; break;
-    case -1: data_wrapper = data_wrapper_m1; break;
+#ruby <<END
+  (0..MAX_ARGS).each do |i|
+    puts <<-END
+    case #{i}: data_wrapper = RUBY_METHOD_FUNC(data_wrapper_#{i}); break;
+    END
+  end
+  nil
+END
+    case -1: data_wrapper = RUBY_METHOD_FUNC(data_wrapper_m1); break;
     default: rb_raise(rb_eArgError, "unsupported arity %d", arity);
   }
 
