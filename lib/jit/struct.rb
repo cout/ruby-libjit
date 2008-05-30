@@ -50,11 +50,11 @@ module JIT
         mod = Module.new do
           struct.members.each do |name|
             define_method("#{name}") do
-              return self[name]
+              self[name] # return
             end
 
             define_method("#{name}=") do |value|
-              return self[name] = value
+              self[name] = value # return
             end
           end
         end
