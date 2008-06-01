@@ -66,7 +66,7 @@ module JIT
     end
 
     def neq(rhs)
-      return self.function.insn_neq(slef, rhs)
+      return self.function.insn_neq(self, rhs)
     end
 
     def <=(rhs)
