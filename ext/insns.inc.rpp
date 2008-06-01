@@ -170,6 +170,7 @@ insns = [
   [ 'address_of_label'     , V, L       ] ,
   [ 'store_relative'       , _, V, N, V ] ,
   [ 'load_relative'        , V, V, N, T ] ,
+  [ 'add_relative'         , V ,V, N    ] ,
   [ 'memcpy'               , _, V, V, V ] ,
   [ 'memmove'              , _, V, V, V ] ,
   [ 'memset'               , _, V, V, V ] ,
