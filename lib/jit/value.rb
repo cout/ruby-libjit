@@ -65,6 +65,10 @@ module JIT
       return self.function.insn_eq(self, rhs)
     end
 
+    def neq(rhs)
+      return self.function.insn_neq(slef, rhs)
+    end
+
     def <=(rhs)
       return self.function.insn_le(self, rhs)
     end
