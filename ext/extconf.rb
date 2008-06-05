@@ -1,6 +1,6 @@
 require 'mkmf'
 
-if not have_library('jit', 'jit_init', []) then
+if not have_library('jit', 'jit_init', ["jit/jit.h"]) then
   $stderr.puts "libjit not found"
   exit 1
 end
@@ -16,6 +16,20 @@ end
 have_func("rb_class_boot", "ruby.h")
 have_func("rb_errinfo", "ruby.h")
 have_func('fmemopen')
+
+checking_for("whether VALUE is a pointer") do
+  if not try_link(<<"SRC")
+#include <ruby.h>
+int main()
+{
+  VALUE v;
+  v /= 5;
+}
+SRC
+  then
+    $defs.push("-DVALUE_IS_PTR");
+  end
+end
 
 rb_files = Dir['*.rb']
 rpp_files = Dir['*.rpp']

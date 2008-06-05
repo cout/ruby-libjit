@@ -33,16 +33,24 @@ struct Closure
   Void_Function_Ptr function_ptr;
 };
 
-#if SIZEOF_VALUE == 4
+#ifdef VALUE_IS_PTR
+/* Rubinius */
+typedef jit_ptr jit_VALUE;
+#define jit_underlying_type_VALUE jit_type_void_ptr
+#define SET_CONSTANT_VALUE(c, v) (c.un.ptr_value = v)
+
+#elif SIZEOF_VALUE == 4
 /* 32-bit */
 typedef jit_uint jit_VALUE;
 #define jit_underlying_type_VALUE jit_type_uint
 #define SET_CONSTANT_VALUE(c, v) (c.un.uint_value = v)
+
 #elif SIZEOF_VALUE == 8
 /* 64-bit */
 typedef jit_ulong jit_VALUE;
 #define jit_underlying_type_VALUE jit_type_ulong
 #define SET_CONSTANT_VALUE(c, v) (c.un.ulong_value = v)
+
 #else
 #error "Unsupported size for VALUE"
 #endif
@@ -678,7 +686,7 @@ static VALUE function_apply(int argc, VALUE * argv, VALUE self)
   signature_tag = (int)jit_function_get_meta(function, RJT_TAG_FOR_SIGNATURE);
   if(signature_tag == JIT_TYPE_FIRST_TAGGED + RJT_RUBY_VARARG_SIGNATURE)
   {
-    jit_uint result;
+    jit_VALUE result;
     int f_argc = argc - 1;
     VALUE f_self = *(VALUE *)argv;
     VALUE * f_argv = ((VALUE *)argv) + 1;
@@ -1070,7 +1078,7 @@ static VALUE value_inspect(VALUE self)
 {
   jit_value_t value;
   jit_type_t type;
-  char * cname = rb_obj_classname(self);
+  char const * cname = rb_obj_classname(self);
   VALUE args[6];
   Data_Get_Struct(self, struct _jit_value, value);
   type = jit_value_get_type(value);
