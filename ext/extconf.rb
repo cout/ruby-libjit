@@ -16,6 +16,7 @@ end
 have_func("rb_class_boot", "ruby.h")
 have_func("rb_errinfo", "ruby.h")
 have_func('fmemopen')
+have_func("rb_ensure", "ruby.h")
 
 checking_for("whether VALUE is a pointer") do
   if not try_link(<<"SRC")

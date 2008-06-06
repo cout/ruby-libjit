@@ -138,11 +138,17 @@ static VALUE context_build(VALUE self)
   jit_context_t context;
   Data_Get_Struct(self, struct _jit_context, context);
   jit_context_build_start(context);
+#ifdef HAVE_RB_ENSURE
   return rb_ensure(
       rb_yield,
       self,
       RUBY_METHOD_FUNC(jit_context_build_end),
       (VALUE)context);
+#else
+  /* Rubinius does not yet have rb_ensure */
+  rb_yield(self);
+  jit_context_build_end(context);
+#endif
 }
 
 /*
@@ -328,11 +334,17 @@ static VALUE function_s_compile(int argc, VALUE * argv, VALUE klass)
   VALUE function = create_function(argc, argv, klass);
   rb_yield(function);
   function_compile(function);
+#ifdef HAVE_RB_ENSURE
   rb_ensure(
       function_compile,
       function,
       function_abandon_if_exception,
       function);
+#else
+  /* Rubinius does not yet have rb_ensure */
+  function_compile(function);
+  function_abandon_if_exception(function);
+#endif
   return function;
 }
 
