@@ -187,7 +187,7 @@ VALUE closure_to_s(VALUE self)
   VALUE args[4];
   Data_Get_Struct(self, struct Closure, closure);
   args[0] = rb_str_new2("#<JIT::Closure:0x%x function=%s function_ptr=0x%x>");
-  args[1] = ULONG2NUM(self);
+  args[1] = ULONG2NUM((unsigned long)self);
   args[2] = rb_any_to_s(closure->function);
   args[3] = ULONG2NUM((unsigned long)closure->function_ptr);
   return rb_f_sprintf(sizeof(args)/sizeof(args[0]), args);
@@ -1096,10 +1096,10 @@ static VALUE value_inspect(VALUE self)
   type = jit_value_get_type(value);
   args[0] = rb_str_new2("#<%s:0x%x %s ptr=0x%x type=0x%x>");
   args[1] = rb_str_new2(cname);
-  args[2] = ULONG2NUM(self);
+  args[2] = ULONG2NUM((unsigned long)self);
   args[3] = value_to_s(self);
-  args[4] = ULONG2NUM((VALUE)value);
-  args[5] = ULONG2NUM((VALUE)type);
+  args[4] = ULONG2NUM((unsigned long)value);
+  args[5] = ULONG2NUM((unsigned long)type);
   return rb_f_sprintf(sizeof(args)/sizeof(args[0]), args);
 }
 
