@@ -31,6 +31,10 @@ SRC
   end
 end
 
+if defined?(RUBY_ENGINE) and RUBY_ENGINE == 'rbx' then
+  $defs.push("-DHAVE_RUBINIUS")
+end
+
 rb_files = Dir['*.rb']
 rpp_files = Dir['*.rpp']
 generated_files = rpp_files.map { |f| f.sub(/\.rpp$/, '') }

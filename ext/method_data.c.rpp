@@ -2,6 +2,8 @@
 
 #include <ruby.h>
 
+#ifndef HAVE_RUBINIUS
+
 #ruby <<END
 MAX_ARGS = 15
 nil
@@ -249,3 +251,17 @@ VALUE get_method_data()
   return data_memo_node()->nd_rval;
 }
 
+#else /* HAVE_RUBINIUS */
+
+void define_method_with_data(
+    VALUE klass, ID id, VALUE (*cfunc)(ANYARGS), int arity, VALUE data)
+{
+  rb_raise(rb_eNotImpError, "Not implemented: define_method_with_data");
+}
+
+VALUE get_method_data()
+{
+  rb_raise(rb_eNotImpError, "Not implemented: get_method_data");
+}
+
+#endif
