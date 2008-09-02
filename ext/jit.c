@@ -1,10 +1,13 @@
+#ifndef RUBY_DEFINES_GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+
+#include <ruby.h>
+
 #include <stdio.h>
 
 #include <jit/jit.h>
 #include <jit/jit-dump.h>
-
-#include <ruby.h>
 
 #include "rubyjit.h"
 #include "method_data.h"

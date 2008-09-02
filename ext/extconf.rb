@@ -13,6 +13,10 @@ if not have_macro("SIZEOF_ID", "ruby.h") then
   check_sizeof("ID", "ruby.h")
 end
 
+if have_macro("_GNU_SOURCE", "ruby.h") then
+  $defs.push("-DRUBY_DEFINES_GNU_SOURCE")
+end
+
 have_func("rb_class_boot", "ruby.h")
 have_func("rb_errinfo", "ruby.h")
 have_func('fmemopen')
