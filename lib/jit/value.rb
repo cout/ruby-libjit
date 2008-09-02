@@ -37,6 +37,10 @@ module JIT
       return self.function.insn_div(self, rhs)
     end
 
+    def -@()
+      return self.function.const(self.type, 0) - self
+    end
+
     def %(rhs)
       return self.function.insn_rem(self, rhs)
     end
