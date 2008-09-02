@@ -1226,6 +1226,21 @@ static VALUE value_function(VALUE self)
   return Data_Wrap_Struct(rb_cFunction, mark_function, 0, function);
 }
 
+/*
+ * call-seq:
+ *   function = value.type()
+ *
+ * Get a value's type.
+ */
+static VALUE value_type(VALUE self)
+{
+  jit_value_t value;
+  jit_type_t type;
+  Data_Get_Struct(self, struct _jit_value, value);
+  type = jit_value_get_type(value);
+  return wrap_type(type);
+}
+
 /* ---------------------------------------------------------------------------
  * Label
  * ---------------------------------------------------------------------------
@@ -1411,6 +1426,7 @@ void Init_jit()
   rb_define_method(rb_cValue, "addressable?", value_is_addressable, 0);
   rb_define_method(rb_cValue, "addressable=", value_set_addressable, 0);
   rb_define_method(rb_cValue, "function", value_function, 0);
+  rb_define_method(rb_cValue, "type", value_type, 0);
 
   rb_cLabel = rb_define_class_under(rb_mJIT, "Label", rb_cObject);
   rb_define_singleton_method(rb_cLabel, "new", label_s_new, 0);
