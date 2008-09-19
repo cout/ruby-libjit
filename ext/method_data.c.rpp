@@ -41,13 +41,30 @@ typedef struct rb_thread_struct rb_thread_t;
  * it off the stack, because the stack pointer will be reset to the
  * previous frame's stack pointer when the function returns.
  */
+static void fix_frame()
+{
+  do {
+    extern rb_thread_t * ruby_current_thread;
+    VALUE * cfp = ruby_current_thread->cfp;
+    CFP_DATA_MEMO_NODE_AND_PC = RBASIC(CFP_METHOD_CLASS)->klass;
+
+    if(rb_type(CFP_DATA_MEMO_NODE_AND_PC) != T_NODE)
+    {
+      /* This can happen for module functions that are created after
+       * the stub function */
+      rb_raise(
+          rb_eRuntimeError,
+          "Cannot find method data for module function");
+    }
+    else
+    {
+      CFP_METHOD_CLASS = RCLASS_SUPER(CFP_METHOD_CLASS);
+    }
+  } while(0);
+}
+
 #define FIX_FRAME() \
-  do { \
-    extern rb_thread_t * ruby_current_thread; \
-    VALUE * cfp = ruby_current_thread->cfp; \
-    CFP_DATA_MEMO_NODE_AND_PC = RBASIC(CFP_METHOD_CLASS)->klass; \
-    CFP_METHOD_CLASS = RCLASS_SUPER(CFP_METHOD_CLASS); \
-  } while(0)
+  fix_frame()
 
 static NODE * data_memo_node()
 {
@@ -158,7 +175,7 @@ END
  *      |  +- iv_index_tbl - 0?
  *      |- (u2) body - NODE_CFUNC
  *      |  |- (u1) cfnc - wrapper function to call
- *      |  +- (u2) argc - function arity
+ *      |  |- (u2) argc - function arity
  *      +- (u3) noex - NOEX_PUBLIC
  *
  * When the wrapper function is called, last_class is set to the origin
