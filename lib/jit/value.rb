@@ -88,6 +88,10 @@ module JIT
     def >>(rhs)
       return self.function.insn_shr(self, rhs)
     end
+
+    def ~()
+      return self.function.insn_not(self)
+    end
   end
 end
 
