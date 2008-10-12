@@ -22,6 +22,17 @@ have_func("rb_errinfo", "ruby.h")
 have_func('fmemopen')
 have_func("rb_ensure", "ruby.h")
 
+if have_header('ruby/node.h') then
+  # ruby.h defines HAVE_RUBY_NODE_H, even though it is not there
+  $defs.push("-DREALLY_HAVE_RUBY_NODE_H")
+elsif have_header('node.h') then
+  # okay
+else
+  $defs.push("-DNEED_MINIMAL_NODE")
+end
+
+have_header('env.h')
+
 checking_for("whether VALUE is a pointer") do
   if not try_link(<<"SRC")
 #include <ruby.h>

@@ -12,6 +12,10 @@
 #include "rubyjit.h"
 #include "method_data.h"
 
+#ifdef NEED_MINIMAL_NODE
+#include "minimal_node.h"
+#endif
+
 static VALUE rb_mJIT;
 static VALUE rb_cContext;
 static VALUE rb_cFunction;
@@ -1441,5 +1445,9 @@ void Init_jit()
 
   /* VALUE rb_cModule = rb_define_module(); */
   rb_define_method(rb_cModule, "define_jit_method", module_define_jit_method, 2);
+
+#ifdef NEED_MINIMAL_NODE
+  Init_minimal_node();
+#endif
 }
 

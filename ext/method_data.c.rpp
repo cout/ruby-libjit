@@ -9,12 +9,22 @@ MAX_ARGS = 15
 nil
 END
 
-#ifdef RUBY_VM
-/* YARV */
-#include <ruby/node.h>
-#else
+#if defined(HAVE_NODE_H)
 /* pre-YARV */
 #include <node.h>
+#elif defined(REALLY_HAVE_RUBY_NODE_H)
+/* YARV */
+#include <ruby/node.h>
+#elif defined(RUBY_VM)
+/* YARV without node.h */
+#include "minimal_node.h"
+#else
+/* something else */
+#error "Need node.h"
+#endif
+
+#ifdef HAVE_ENV_H
+/* pre-YARV */
 #include <env.h>
 #endif
 
