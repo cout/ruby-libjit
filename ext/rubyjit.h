@@ -13,4 +13,8 @@ enum Ruby_Libjit_Tag
   RJT_TAG_FOR_SIGNATURE
 };
 
+extern jit_type_t jit_type_VALUE;
+extern jit_type_t jit_type_ID;
+extern jit_type_t jit_type_Function_Ptr;
+
 #endif

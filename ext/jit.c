@@ -26,9 +26,9 @@ static VALUE rb_cLabel;
 static VALUE rb_mCall;
 static VALUE rb_cClosure;
 
-static jit_type_t jit_type_VALUE;
-static jit_type_t jit_type_ID;
-static jit_type_t jit_type_Function_Ptr;
+jit_type_t jit_type_VALUE;
+jit_type_t jit_type_ID;
+jit_type_t jit_type_Function_Ptr;
 
 static jit_type_t ruby_vararg_signature;
 
@@ -1042,6 +1042,22 @@ static VALUE type_get_offset(VALUE self, VALUE field_index_v)
 
 /*
  * call-seq:
+ *   offset = struct_type.set_offset(index, offset)
+ *
+ * Set the offset of the nth field in a struct.
+ */
+static VALUE type_set_offset(VALUE self, VALUE field_index_v, VALUE offset_v)
+{
+  int field_index = NUM2INT(field_index_v);
+  int offset = NUM2UINT(offset_v);
+  jit_type_t type;
+  Data_Get_Struct(self, struct _jit_type, type);
+  jit_type_set_offset(type, field_index, offset);
+  return Qnil;
+}
+
+/*
+ * call-seq:
  *   offset = struct_type.size
  *
  * Get the size of a struct or union type.
@@ -1372,9 +1388,10 @@ void Init_jit()
   rb_define_singleton_method(rb_cType, "create_struct", type_s_create_struct, 1);
   rb_define_singleton_method(rb_cType, "create_pointer", type_s_create_pointer, 1);
   rb_define_method(rb_cType, "get_offset", type_get_offset, 1);
+  rb_define_method(rb_cType, "set_offset", type_set_offset, 2);
   rb_define_method(rb_cType, "size", type_size, 0);
   rb_define_const(rb_cType, "VOID", wrap_type(jit_type_void));
-  rb_define_const(rb_cType, "SBYTES", wrap_type(jit_type_sbyte));
+  rb_define_const(rb_cType, "SBYTE", wrap_type(jit_type_sbyte));
   rb_define_const(rb_cType, "UBYTE", wrap_type(jit_type_ubyte));
   rb_define_const(rb_cType, "SHORT", wrap_type(jit_type_short));
   rb_define_const(rb_cType, "USHORT", wrap_type(jit_type_ushort));
