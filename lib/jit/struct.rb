@@ -34,6 +34,11 @@ module JIT
       return self.get_offset(@index[name])
     end
 
+    def set_offset_of(name, offset)
+      name = (Symbol === name) ? name : name.to_s.intern
+      return self.set_offset(@index[name], offset)
+    end
+
     def type_of(name)
       name = (Symbol === name) ? name : name.to_s.intern
       return @member_types[@index[name]]
