@@ -56,6 +56,35 @@ module JIT
       end
     end
 
+    def case(value)
+      return Case.new(self, value)
+    end
+
+    class Case
+      def initialize(function, value)
+        @function = function
+        @value = value
+        @if = nil
+      end
+
+      def when(value, &block)
+        if not @if then
+          @if = @function.if(value == @value, &block)
+        else
+          @if.elsif(value == @value, &block)
+        end
+        return self
+      end
+
+      def else(&block)
+        @if.else(&block)
+      end
+
+      def end
+        @if.end if @if
+      end
+    end
+
     # Usage:
     #   until(proc { <condition> }) {
     #   } .end
