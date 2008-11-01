@@ -15,6 +15,10 @@ A wrapper for the libjit library
 
 
   patterns = [
+    'COPYING',
+    'LGPL',
+    'LICENSE',
+    'README',
     'lib/*.rb',
     'lib/jit/*.rb',
     'ext/*.rb',
@@ -29,5 +33,7 @@ A wrapper for the libjit library
   s.test_files = Dir.glob('test/test_*.rb')
 
   s.extensions = 'ext/extconf.rb'
+
+  s.has_rdoc = true
 end
 
