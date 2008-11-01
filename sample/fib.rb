@@ -9,11 +9,11 @@ JIT::Context.build do |context|
   fib = JIT::Function.compile(context, signature) do |f|
     n = f.param(0)
 
-    a = f.value(JIT::Type::INT); a.store(0)
-    b = f.value(JIT::Type::INT); b.store(1)
-    c = f.value(JIT::Type::INT); c.store(1)
+    a = f.value(JIT::Type::INT, 0)
+    b = f.value(JIT::Type::INT, 1)
+    c = f.value(JIT::Type::INT, 1)
 
-    i = f.value(JIT::Type::INT); i.store(0)
+    i = f.value(JIT::Type::INT, 0)
 
     f.while(proc { i < n }) {
       c.store(a + b)

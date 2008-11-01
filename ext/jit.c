@@ -391,15 +391,35 @@ static VALUE function_value_klass(VALUE self, VALUE type_v, VALUE klass)
   return Data_Wrap_Struct(klass, 0, 0, value);
 }
 
+static VALUE coerce_to_jit(VALUE function, VALUE type_v, VALUE value_v);
+
 /*
  * call-seq:
  *   value = function.value(type)
+ *   value = function.value(type, initial_value)
  *
  * Create a value (placeholder/variable) with the given type.
  */
-static VALUE function_value(VALUE self, VALUE type_v)
+static VALUE function_value(int argc, VALUE * argv, VALUE self)
 {
-  return function_value_klass(self, type_v, rb_cValue);
+  VALUE type_v = Qnil;
+  VALUE initial_value_v = Qnil;
+
+  VALUE new_value = Qnil;
+
+  rb_scan_args(argc, argv, "11", &type_v, &initial_value_v);
+
+  new_value = function_value_klass(self, type_v, rb_cValue);
+
+  if(argc > 1)
+  {
+    function_insn_store(
+        self,
+        new_value,
+        coerce_to_jit(self, type_v, initial_value_v));
+  }
+
+  return new_value;
 }
 
 static jit_value_t create_const(jit_function_t function, jit_type_t type, VALUE constant)
@@ -499,6 +519,18 @@ static VALUE function_const(VALUE self, VALUE type_v, VALUE constant)
 
   value = create_const(function, type, constant);
   return Data_Wrap_Struct(rb_cValue, 0, 0, value);
+}
+
+static VALUE coerce_to_jit(VALUE function, VALUE type_v, VALUE value_v)
+{
+  if(rb_obj_is_kind_of(value_v, rb_cValue))
+  {
+    return value_v;
+  }
+  else
+  {
+    return function_const(function, type_v, value_v);
+  }
 }
 
 static void convert_call_args(jit_function_t function, jit_value_t * args, VALUE args_v, jit_type_t signature)
@@ -1264,6 +1296,24 @@ static VALUE value_type(VALUE self)
   return wrap_type(type);
 }
 
+/*
+ * call-seq:
+ *   value1, value2 = value1.coerce(value2)
+ *
+ * If the given value is a JIT::Value, return an +[ self, value ]+,
+ * otherwise coerce the value to the same type as self and return
+ * +[ self, coerced_value ]+.
+ */
+static VALUE value_coerce(VALUE self, VALUE value)
+{
+  return rb_assoc_new(
+      self,
+      coerce_to_jit(
+          value_function(self),
+          value_type(self),
+          value));
+}
+
 /* ---------------------------------------------------------------------------
  * Label
  * ---------------------------------------------------------------------------
@@ -1373,7 +1423,7 @@ void Init_jit()
   rb_define_method(rb_cFunction, "insn_return", function_insn_return, -1);
   rb_define_method(rb_cFunction, "apply", function_apply, -1);
   rb_define_alias(rb_cFunction, "call", "apply");
-  rb_define_method(rb_cFunction, "value", function_value, 1);
+  rb_define_method(rb_cFunction, "value", function_value, -1);
   rb_define_method(rb_cFunction, "const", function_const, 2);
   rb_define_method(rb_cFunction, "optimization_level", function_optimization_level, 0);
   rb_define_method(rb_cFunction, "optimization_level=", function_set_optimization_level, 1);
@@ -1451,6 +1501,7 @@ void Init_jit()
   rb_define_method(rb_cValue, "addressable=", value_set_addressable, 0);
   rb_define_method(rb_cValue, "function", value_function, 0);
   rb_define_method(rb_cValue, "type", value_type, 0);
+  rb_define_method(rb_cValue, "coerce", value_coerce, 1);
 
   rb_cLabel = rb_define_class_under(rb_mJIT, "Label", rb_cObject);
   rb_define_singleton_method(rb_cLabel, "new", label_s_new, 0);

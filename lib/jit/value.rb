@@ -194,17 +194,6 @@ module JIT
     def ~()
       return self.function.insn_not(self)
     end
-
-    # If the given value is a JIT::Value, return an +[ self, value ]+,
-    # otherwise coerce the value to the same type as self and return
-    # +[ self, coerced_value ]+.
-    def coerce(value)
-      if JIT::Value === value then
-        return [ self, value ]
-      else
-        return [ self, function.const(self.type, value) ]
-      end
-    end
   end
 end
 
