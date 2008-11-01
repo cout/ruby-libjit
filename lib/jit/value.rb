@@ -25,7 +25,8 @@ module JIT
     # +value+:: The value to assign.
     #
     def store(value)
-      self.function.insn_store(self, value)
+      lhs, rhs = coerce(value)
+      self.function.insn_store(lhs, rhs)
     end
 
     # Return the address of this value.
@@ -38,7 +39,8 @@ module JIT
     # +rhs+:: The right hand side of the addition operator.
     #
     def +(rhs)
-      return self.function.insn_add(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_add(lhs, rhs)
     end
 
     # Subtract another value from this one and return the result.
@@ -46,7 +48,8 @@ module JIT
     # +rhs+:: The right hand side of the subtraction operator.
     #
     def -(rhs)
-      return self.function.insn_sub(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_sub(lhs, rhs)
     end
 
     # Multiply this value by another and return the result.
@@ -54,7 +57,8 @@ module JIT
     # +rhs+:: The right hand side of the multiplication operator.
     #
     def *(rhs)
-      return self.function.insn_mul(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_mul(lhs, rhs)
     end
 
     # Divide this value by another and return the quotient.
@@ -62,12 +66,14 @@ module JIT
     # +rhs+:: The right hand side of the division operator.
     #
     def /(rhs)
-      return self.function.insn_div(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_div(lhs, rhs)
     end
 
     # Return the additive inverse (negation) of this value.
     def -@()
-      return self.function.const(self.type, 0) - self
+      rhs, lhs = coerce(0) # inverted, since we are subtracting from 0
+      return lhs - rhs
     end
 
     # Divide this value by another and return the remainder.
@@ -75,7 +81,8 @@ module JIT
     # +rhs+:: The right hand side of the modulus operator.
     #
     def %(rhs)
-      return self.function.insn_rem(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_rem(lhs, rhs)
     end
 
     # Perform a bitwise and between this value and another.
@@ -83,7 +90,8 @@ module JIT
     # +rhs+:: The right hand side of the operator.
     #
     def &(rhs)
-      return self.function.insn_and(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_and(lhs, rhs)
     end
 
     # Perform a bitwise or between this value and another.
@@ -91,7 +99,8 @@ module JIT
     # +rhs+:: The right hand side of the operator.
     #
     def |(rhs)
-      return self.function.insn_or(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_or(lhs, rhs)
     end
 
     # Perform a bitwise xor between this value and another.
@@ -99,7 +108,8 @@ module JIT
     # +rhs+:: The right hand side of the operator.
     #
     def ^(rhs)
-      return self.function.insn_xor(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_xor(lhs, rhs)
     end
 
     # Compare this value to another, returning 1 if the left hand is
@@ -108,7 +118,8 @@ module JIT
     # +rhs+:: The right hand side of the comparison.
     #
     def <(rhs)
-      return self.function.insn_lt(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_lt(lhs, rhs)
     end
 
     # Compare this value to another, returning 1 if the left hand is
@@ -117,7 +128,8 @@ module JIT
     # +rhs+:: The right hand side of the comparison.
     #
     def >(rhs)
-      return self.function.insn_gt(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_gt(lhs, rhs)
     end
 
     # Compare this value to another, returning 1 if the left hand is
@@ -126,7 +138,8 @@ module JIT
     # +rhs+:: The right hand side of the comparison.
     #
     def ==(rhs)
-      return self.function.insn_eq(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_eq(lhs, rhs)
     end
 
     # Compare this value to another, returning 1 if the left hand is
@@ -135,7 +148,8 @@ module JIT
     # +rhs+:: The right hand side of the comparison.
     #
     def neq(rhs)
-      return self.function.insn_ne(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_ne(lhs, rhs)
     end
 
     # Compare this value to another, returning 1 if the left hand is
@@ -144,7 +158,8 @@ module JIT
     # +rhs+:: The right hand side of the comparison.
     #
     def <=(rhs)
-      return self.function.insn_le(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_le(lhs, rhs)
     end
 
     # Compare this value to another, returning 1 if the left hand is
@@ -153,7 +168,8 @@ module JIT
     # +rhs+:: The right hand side of the comparison.
     #
     def >=(rhs)
-      return self.function.insn_ge(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_ge(lhs, rhs)
     end
 
     # Shift this value left by the given number of bits.
@@ -161,7 +177,8 @@ module JIT
     # +rhs+:: The number of bits to shift by.
     #
     def <<(rhs)
-      return self.function.insn_shl(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_shl(lhs, rhs)
     end
 
     # Shift this value right by the given number of bits.
@@ -169,12 +186,24 @@ module JIT
     # +rhs+:: The number of bits to shift by.
     #
     def >>(rhs)
-      return self.function.insn_shr(self, rhs)
+      lhs, rhs = coerce(rhs)
+      return self.function.insn_shr(lhs, rhs)
     end
 
     # Return the logical inverse of this value.
     def ~()
       return self.function.insn_not(self)
+    end
+
+    # If the given value is a JIT::Value, return an +[ self, value ]+,
+    # otherwise coerce the value to the same type as self and return
+    # +[ self, coerced_value ]+.
+    def coerce(value)
+      if JIT::Value === value then
+        return [ self, value ]
+      else
+        return [ self, function.const(self.type, value) ]
+      end
     end
   end
 end
