@@ -1,0 +1,22 @@
+Ruby-libjit 0.1.0
+Copyright (C) 2008 Paul Brannan
+
+Ruby-libjit is a wrapper for the libjit library.  It provides basic
+functionality for jit-compiling functions, including integrating those
+functions as callable methods from within Ruby.  Abstractions are also
+provided so that jit code may be written in a ruby-like manner.
+
+A simple example:
+
+  :include: sample/simple.rb
+
+Looping structures and other abstractions are provided to make writing
+jit code easier:
+
+  :include: sample/fib.rb
+
+For a more complete JIT framework and compiler for Ruby code, please
+take a look at Ludicrous:
+
+  http://rubystuff.org/ludicrous/
+
