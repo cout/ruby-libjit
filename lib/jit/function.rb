@@ -179,6 +179,11 @@ module JIT
       end
     end
 
+    # An alias for get_param
+    def param(n)
+      self.get_param(n)
+    end
+
     # An alias for insn_return
     def return(result)
       self.insn_return(result)
