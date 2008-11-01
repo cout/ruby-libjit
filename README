@@ -17,6 +17,26 @@ jit code easier:
 
   :include: sample/fib.rb
 
+To build ruby-libjit, you will need to install libjit.  If it is not
+available pre-compiled for your platform, you may build the latest
+release like this:
+
+  $ wget ftp://ftp.gnu.org/gnu/dotgnu/pnet/libjit-0.1.0.tar.gz
+  $ tar xvfz libjit-0.1.0.tar.gz
+  $ cd libjit-0.1.0
+  $ ./configure
+  $ make
+  $ sudo make install
+
+Or the latest development version like this:
+
+  $ cvs -z3 -d:pserver:anonymous@cvs.sv.gnu.org:/sources/dotgnu-pnet co libjit
+  $ cd libjit
+  $ ./auto_gen.sh
+  $ ./configure
+  $ make
+  $ sudo make install
+
 For a more complete JIT framework and compiler for Ruby code, please
 take a look at Ludicrous:
 
