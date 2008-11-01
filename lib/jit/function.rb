@@ -2,9 +2,11 @@ require 'jit'
 
 module JIT
   class Function
-    # An abstraction for conditionals.  Use it like this:
+    # An abstraction for conditionals.
     #
-    #   if(condition) {
+    # Example usage:
+    #
+    #   function.if(condition) {
     #     # condition is true
     #   } .elsif(condition2) {
     #     # condition2 is true
@@ -23,6 +25,20 @@ module JIT
       return If.new(self, end_label)
     end
 
+    # An abstraction for an inverted conditional.
+    #
+    # Example usage:
+    #
+    #   function.unless(condition) {
+    #     # condition is false
+    #   } .elsunless(condition2) {
+    #     # condition2 is false
+    #   } .else {
+    #     # condition1 and condition2 are true
+    #   } .end
+    #
+    # Caution: if you omit end, then the generated code will have
+    # undefined behavior, but there will be no warning generated.
     def unless(cond, end_label = Label.new, &block)
       true_label = Label.new
       insn_branch_if(cond, true_label)
@@ -32,6 +48,7 @@ module JIT
       return If.new(self, end_label)
     end
 
+    # :nodoc:
     class If
       def initialize(function, end_label)
         @function = function
@@ -56,10 +73,26 @@ module JIT
       end
     end
 
+    # An abstraction for a multi-way conditional.
+    #
+    # Example usage:
+    #
+    #   function.case(value1)
+    #   .when(value2) {
+    #     # value1 == value2
+    #   }.when(value3) {
+    #     # value1 == value3
+    #   } .else {
+    #     # all other cases fell through
+    #   } .end
+    #
+    # Caution: if you omit end, then the generated code will have
+    # undefined behavior, but there will be no warning generated.
     def case(value)
       return Case.new(self, value)
     end
 
+    # :nodoc:
     class Case
       def initialize(function, value)
         @function = function
@@ -86,8 +119,11 @@ module JIT
     end
 
     # Usage:
+    #
     #   until(proc { <condition> }) {
+    #     # loop body
     #   } .end
+    #
     def until(cond, &block)
       start_label = Label.new
       done_label = Label.new
@@ -101,8 +137,11 @@ module JIT
     end
 
     # Usage:
+    #
     #   while(proc { <condition> }) {
+    #     # loop body
     #   } .end
+    #
     def while(cond, &block)
       start_label = Label.new
       done_label = Label.new
@@ -115,6 +154,7 @@ module JIT
       return loop
     end
 
+    # :nodoc:
     class Loop
       def initialize(function, start_label, done_label)
         @function = function
@@ -139,6 +179,7 @@ module JIT
       end
     end
 
+    # An alias for insn_return
     def return(result)
       self.insn_return(result)
     end
