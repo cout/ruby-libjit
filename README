@@ -37,6 +37,12 @@ Or the latest development version like this:
   $ make
   $ sudo make install
 
+To build ruby-libjit, run setup.rb:
+
+  $ ruby setup.rb config
+  $ ruby setup.rb setup
+  $ sudo ruby setup.rb install
+
 For a more complete JIT framework and compiler for Ruby code, please
 take a look at Ludicrous:
 
