@@ -1,2 +1,7 @@
 *.rbc
 .*.swp
+*~
+*.o
+*.so
+.config
+InstalledFiles
