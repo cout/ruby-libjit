@@ -1,29 +1,27 @@
 require 'jit'
 
 fib = nil
-JIT::Context.build do |context|
-  signature = JIT::Type.create_signature(
-      JIT::ABI::CDECL,
-      JIT::Type::INT,
-      [ JIT::Type::INT ])
-  fib = JIT::Function.compile(context, signature) do |f|
-    n = f.param(0)
+signature = JIT::Type.create_signature(
+    JIT::ABI::CDECL,
+    JIT::Type::INT,
+    [ JIT::Type::INT ])
+fib = JIT::Function.build(signature) do |f|
+  n = f.param(0)
 
-    a = f.value(JIT::Type::INT, 0)
-    b = f.value(JIT::Type::INT, 1)
-    c = f.value(JIT::Type::INT, 1)
+  a = f.value(JIT::Type::INT, 0)
+  b = f.value(JIT::Type::INT, 1)
+  c = f.value(JIT::Type::INT, 1)
 
-    i = f.value(JIT::Type::INT, 0)
+  i = f.value(JIT::Type::INT, 0)
 
-    f.while(proc { i < n }) {
-      c.store(a + b)
-      a.store(b)
-      b.store(c)
-      i.store(i + 1)
-    }.end
+  f.while(proc { i < n }) {
+    c.store(a + b)
+    a.store(b)
+    b.store(c)
+    i.store(i + 1)
+  }.end
 
-    f.return(c)
-  end
+  f.return(c)
 end
 
 values = (0...10).collect { |x| fib.apply(x) }

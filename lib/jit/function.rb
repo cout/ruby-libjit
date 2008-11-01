@@ -188,6 +188,14 @@ module JIT
     def return(result)
       self.insn_return(result)
     end
+
+    # Create a JIT::Context and compile a new function within that
+    # context.
+    def self.build(*args, &block)
+      JIT::Context.build do |context|
+        JIT::Function.compile(context, *args, &block)
+      end
+    end
   end
 end
 
