@@ -1,7 +1,7 @@
 #
 # setup.rb
 #
-# Copyright (c) 2000-2005 Minero Aoki
+# Copyright (c) 2000-2006 Minero Aoki
 #
 # This program is free software.
 # You can distribute/modify this program under the terms of
@@ -296,13 +296,14 @@ class ConfigTable
     ALIASES.each do |ali, name|
       @table[ali] = @table[name]
     end
-    @items.freeze
-    @table.freeze
-    @options_re = /\A--(#{@table.keys.join('|')})(?:=(.*))?\z/
+  end
+
+  def options_re
+    /\A--(#{@table.keys.join('|')})(?:=(.*))?\z/
   end
 
   def parse_opt(opt)
-    m = @options_re.match(opt) or setup_rb_error "config: unknown option #{opt}"
+    m = options_re().match(opt) or setup_rb_error "config: unknown option #{opt}"
     m.to_a[1,2]
   end
 
@@ -751,7 +752,7 @@ end
 class ToplevelInstaller
 
   Version   = '3.4.1'
-  Copyright = 'Copyright (c) 2000-2005 Minero Aoki'
+  Copyright = 'Copyright (c) 2000-2006 Minero Aoki'
 
   TASKS = [
     [ 'all',      'do config, setup, then install' ],
@@ -1343,7 +1344,11 @@ class Installer
   end
 
   def install_dir_bin(rel)
-    install_files targetfiles(), "#{config('bindir')}/#{rel}", 0755
+    install_files targetfiles(), "#{config('bindir')}/#{rel}", 0755, strip_ext?
+  end
+
+  def strip_ext?
+    /mswin|mingw/ !~ RUBY_PLATFORM
   end
 
   def install_dir_lib(rel)
@@ -1371,10 +1376,15 @@ class Installer
     install_files targetfiles(), "#{config('mandir')}/#{rel}", 0644
   end
 
-  def install_files(list, dest, mode)
+  def install_files(list, dest, mode, stripext = false)
     mkdir_p dest, @config.install_prefix
     list.each do |fname|
-      install fname, dest, mode, @config.install_prefix
+      if stripext
+        install fname, "#{dest}/#{File.basename(fname, '.*')}",
+                mode, @config.install_prefix
+      else
+        install fname, dest, mode, @config.install_prefix
+      end
     end
   end
 
@@ -1418,7 +1428,7 @@ class Installer
 
   def hookfiles
     %w( pre-%s post-%s pre-%s.rb post-%s.rb ).map {|fmt|
-      %w( config setup install clean ).map {|t| sprintf(fmt, t) }
+      %w( config setup install clean distclean ).map {|t| sprintf(fmt, t) }
     }.flatten
   end
 
@@ -1556,6 +1566,7 @@ class Installer
     path = [ "#{curr_srcdir()}/#{id}",
              "#{curr_srcdir()}/#{id}.rb" ].detect {|cand| File.file?(cand) }
     return unless path
+    $stderr.puts "invoking hook script #{path}" if verbose?
     begin
       instance_eval File.read(path), path, 1
     rescue
@@ -1573,13 +1584,16 @@ def setup_rb_error(msg)
   raise SetupError, msg
 end
 
+# $DEBUG = true
+
 if $0 == __FILE__
-  begin
     ToplevelInstaller.invoke
-  rescue SetupError
-    raise if $DEBUG
-    $stderr.puts $!.message
-    $stderr.puts "Try 'ruby #{$0} --help' for detailed usage."
-    exit 1
-  end
+    # begin
+    #   ToplevelInstaller.invoke
+    # rescue SetupError
+    #   raise if $DEBUG
+    #   $stderr.puts $!.message
+    #   $stderr.puts "Try 'ruby #{$0} --help' for detailed usage."
+    #   exit 1
+    # end
 end
