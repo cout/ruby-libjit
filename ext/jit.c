@@ -1301,6 +1301,7 @@ static VALUE value_type(VALUE self)
   jit_type_t type;
   Data_Get_Struct(self, struct _jit_value, value);
   type = jit_value_get_type(value);
+  type = jit_type_copy(type);
   return wrap_type(type);
 }
 
