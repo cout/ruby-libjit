@@ -48,8 +48,7 @@ module JIT
       return If.new(self, end_label)
     end
 
-    # :nodoc:
-    class If
+    class If # :nodoc:
       def initialize(function, end_label)
         @function = function
         @end_label = end_label
@@ -92,8 +91,7 @@ module JIT
       return Case.new(self, value)
     end
 
-    # :nodoc:
-    class Case
+    class Case # :nodoc:
       def initialize(function, value)
         @function = function
         @value = value
@@ -154,8 +152,7 @@ module JIT
       return loop
     end
 
-    # :nodoc:
-    class Loop
+    class Loop # :nodoc:
       def initialize(function, start_label, done_label)
         @function = function
         @redo_label = start_label
