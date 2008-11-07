@@ -58,8 +58,8 @@ def run_tests
     return
   end
 
-  $:.unshift('ext')
-  $:.unshift('lib')
+  $:.unshift(File.join(Dir.pwd, 'ext'))
+  $:.unshift(File.join(Dir.pwd, 'lib'))
   Dir.chdir('test')
   tests = Dir['test_*.rb']
   tests.each do |test|
