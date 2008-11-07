@@ -16,6 +16,14 @@
 #include "minimal_node.h"
 #endif
 
+#ifndef RARRAY_LEN
+#define RARRAY_LEN(a) RARRAY(a)->len
+#endif
+
+#ifndef RARRAY_PTR
+#define RARRAY_PTR(a) RARRAY(a)->ptr
+#endif
+
 static VALUE rb_mJIT;
 static VALUE rb_cContext;
 static VALUE rb_cFunction;
@@ -537,9 +545,9 @@ static void convert_call_args(jit_function_t function, jit_value_t * args, VALUE
 {
   int j;
 
-  for(j = 0; j < RARRAY(args_v)->len; ++j)
+  for(j = 0; j < RARRAY_LEN(args_v); ++j)
   {
-    VALUE value = RARRAY(args_v)->ptr[j];
+    VALUE value = RARRAY_PTR(args_v)[j];
     jit_value_t arg;
 
     jit_type_t type = jit_type_get_param(signature, j);
@@ -596,7 +604,7 @@ static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
   check_type("called function", rb_cFunction, called_function_v);
   Data_Get_Struct(called_function_v, struct _jit_function, called_function);
 
-  num_args = RARRAY(args_v)->len;
+  num_args = RARRAY_LEN(args_v);
   args = ALLOCA_N(jit_value_t, num_args);
 
   signature = jit_function_get_signature(function);
@@ -650,7 +658,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
 
   Data_Get_Struct(signature_v, struct _jit_type, signature);
 
-  num_args = RARRAY(args_v)->len;
+  num_args = RARRAY_LEN(args_v);
   args = ALLOCA_N(jit_value_t, num_args);
 
   if(num_args != jit_type_num_params(signature))
@@ -1001,11 +1009,11 @@ static VALUE type_s_create_signature(
   Data_Get_Struct(return_type_v, struct _jit_type, return_type);
 
   Check_Type(params_v, T_ARRAY);
-  len = RARRAY(params_v)->len;
+  len = RARRAY_LEN(params_v);
   params = ALLOCA_N(jit_type_t, len);
   for(j = 0; j < len; ++j)
   {
-    VALUE param = RARRAY(params_v)->ptr[j];
+    VALUE param = RARRAY_PTR(params_v)[j];
     check_type("param", rb_cType, param);
     Data_Get_Struct(param, struct _jit_type, params[j]);
   }
@@ -1029,16 +1037,16 @@ static VALUE type_s_create_struct(
   int j;
 
   Check_Type(fields_v, T_ARRAY);
-  len = RARRAY(fields_v)->len;
+  len = RARRAY_LEN(fields_v);
   fields = ALLOCA_N(jit_type_t, len);
   for(j = 0; j < len; ++j)
   {
-    VALUE field = RARRAY(fields_v)->ptr[j];
+    VALUE field = RARRAY_PTR(fields_v)[j];
     check_type("field", rb_cType, field);
     Data_Get_Struct(field, struct _jit_type, fields[j]);
   }
 
-  struct_type = jit_type_create_struct(fields, RARRAY(fields_v)->len, 1);
+  struct_type = jit_type_create_struct(fields, RARRAY_LEN(fields_v), 1);
   return wrap_type_with_klass(struct_type, klass);
 }
 
