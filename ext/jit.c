@@ -97,6 +97,18 @@ typedef jit_ptr jit_Function_Ptr;
  * ---------------------------------------------------------------------------
  */
 
+static VALUE lookup_const(VALUE module, VALUE symbol)
+{
+  if(SYMBOL_P(symbol))
+  {
+    return rb_const_get(module, SYM2ID(symbol));
+  }
+  else
+  {
+    return symbol;
+  }
+}
+
 static void check_type(char const * param_name, VALUE expected_klass, VALUE val)
 {
   if(!rb_obj_is_kind_of(val, expected_klass))
@@ -389,6 +401,7 @@ static VALUE function_value_klass(VALUE self, VALUE type_v, VALUE klass)
 
   Data_Get_Struct(self, struct _jit_function, function);
 
+  type_v = lookup_const(rb_cType, type_v);
   check_type("type", rb_cType, type_v);
   Data_Get_Struct(type_v, struct _jit_type, type);
 
@@ -522,6 +535,7 @@ static VALUE function_const(VALUE self, VALUE type_v, VALUE constant)
 
   Data_Get_Struct(self, struct _jit_function, function);
 
+  type_v = lookup_const(rb_cType, type_v);
   check_type("type", rb_cType, type_v);
   Data_Get_Struct(type_v, struct _jit_type, type);
 
@@ -997,15 +1011,15 @@ static VALUE wrap_type(jit_type_t type)
 static VALUE type_s_create_signature(
     VALUE klass, VALUE abi_v, VALUE return_type_v, VALUE params_v)
 {
-  jit_abi_t abi = NUM2INT(abi_v);
+  jit_abi_t abi;
   jit_type_t return_type;
   jit_type_t * params;
   jit_type_t signature;
   int j;
   int len;
 
+  return_type_v = lookup_const(rb_cType, return_type_v);
   check_type("return type", rb_cType, return_type_v);
-
   Data_Get_Struct(return_type_v, struct _jit_type, return_type);
 
   Check_Type(params_v, T_ARRAY);
@@ -1014,9 +1028,13 @@ static VALUE type_s_create_signature(
   for(j = 0; j < len; ++j)
   {
     VALUE param = RARRAY_PTR(params_v)[j];
+    param = lookup_const(rb_cType, param);
     check_type("param", rb_cType, param);
     Data_Get_Struct(param, struct _jit_type, params[j]);
   }
+
+  abi_v = lookup_const(rb_mABI, abi_v);
+  abi = NUM2INT(abi_v);
 
   signature = jit_type_create_signature(abi, return_type, params, len, 1);
   return wrap_type(signature);
