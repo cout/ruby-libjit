@@ -169,7 +169,7 @@ class TestJitFunction < Test::Unit::TestCase
       function = JIT::Function.compile(context, signature) do |f|
         true_value = f.const(JIT::Type::INT, 1)
         false_value = f.const(JIT::Type::INT, 0)
-        f.while(proc { true_value }) {
+        f.while{ true_value }.do {
           f.insn_return true_value
         }.end
         f.insn_return false_value
@@ -189,7 +189,7 @@ class TestJitFunction < Test::Unit::TestCase
       function = JIT::Function.compile(context, signature) do |f|
         value = f.value(JIT::Type::INT)
         value.store(f.const(JIT::Type::INT, 0))
-        f.while(proc { value < f.const(JIT::Type::INT, 2) }) {
+        f.while{ value < f.const(JIT::Type::INT, 2) }.do {
           value.store(value + f.const(JIT::Type::INT, 1))
         }.end
         f.insn_return value
@@ -209,7 +209,7 @@ class TestJitFunction < Test::Unit::TestCase
       function = JIT::Function.compile(context, signature) do |f|
         true_value = f.const(JIT::Type::INT, 1)
         false_value = f.const(JIT::Type::INT, 0)
-        f.while(proc { false_value }) {
+        f.while{ false_value }.do {
           f.insn_return true_value
         }.end
         f.insn_return false_value
@@ -229,7 +229,7 @@ class TestJitFunction < Test::Unit::TestCase
       function = JIT::Function.compile(context, signature) do |f|
         true_value = f.const(JIT::Type::INT, 1)
         false_value = f.const(JIT::Type::INT, 0)
-        f.until(proc { false_value }) {
+        f.until{ false_value }.do {
           f.insn_return true_value
         }.end
         f.insn_return false_value
@@ -249,7 +249,7 @@ class TestJitFunction < Test::Unit::TestCase
       function = JIT::Function.compile(context, signature) do |f|
         value = f.value(JIT::Type::INT)
         value.store(f.const(JIT::Type::INT, 0))
-        f.until(proc { value == f.const(JIT::Type::INT, 2) }) {
+        f.until{ value == f.const(JIT::Type::INT, 2) }.do {
           value.store(value + f.const(JIT::Type::INT, 1))
         }.end
         f.insn_return value
@@ -269,7 +269,7 @@ class TestJitFunction < Test::Unit::TestCase
       function = JIT::Function.compile(context, signature) do |f|
         true_value = f.const(JIT::Type::INT, 1)
         false_value = f.const(JIT::Type::INT, 0)
-        f.until(proc { true_value }) {
+        f.until{ true_value }.do {
           f.insn_return true_value
         }.end
         f.insn_return false_value

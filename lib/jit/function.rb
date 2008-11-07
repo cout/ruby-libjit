@@ -122,44 +122,46 @@ module JIT
     #     # loop body
     #   } .end
     #
-    def until(cond, &block)
+    def until(&block)
       start_label = Label.new
       done_label = Label.new
       insn_label(start_label)
-      insn_branch_if(cond.call, done_label)
+      insn_branch_if(block.call, done_label)
       loop = Loop.new(self, start_label, done_label)
-      block.call(loop)
-      insn_branch(start_label)
-      insn_label(done_label)
       return loop
     end
 
     # Usage:
     #
-    #   while(proc { <condition> }) {
+    #   while { <condition> }.do {
     #     # loop body
     #   } .end
     #
-    def while(cond, &block)
+    def while(&block)
       start_label = Label.new
       done_label = Label.new
       insn_label(start_label)
-      insn_branch_if_not(cond.call, done_label)
+      insn_branch_if_not(block.call, done_label)
       loop = Loop.new(self, start_label, done_label)
-      block.call(loop)
-      insn_branch(start_label)
-      insn_label(done_label)
       return loop
     end
 
     class Loop # :nodoc:
       def initialize(function, start_label, done_label)
         @function = function
+        @start_label = start_label
         @redo_label = start_label
         @done_label = done_label
       end
 
+      def do(&block)
+        block.call(self)
+        return self
+      end
+
       def end
+        @function.insn_branch(@start_label)
+        @function.insn_label(@done_label)
       end
 
       def break

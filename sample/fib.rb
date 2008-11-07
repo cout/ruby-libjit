@@ -2,19 +2,19 @@ require 'jit'
 
 fib = nil
 signature = JIT::Type.create_signature(
-    JIT::ABI::CDECL,
-    JIT::Type::INT,
-    [ JIT::Type::INT ])
+    :CDECL,
+    :INT,
+    [ :INT ])
 fib = JIT::Function.build(signature) do |f|
   n = f.param(0)
 
-  a = f.value(JIT::Type::INT, 0)
-  b = f.value(JIT::Type::INT, 1)
-  c = f.value(JIT::Type::INT, 1)
+  a = f.value(:INT, 0)
+  b = f.value(:INT, 1)
+  c = f.value(:INT, 1)
 
-  i = f.value(JIT::Type::INT, 0)
+  i = f.value(:INT, 0)
 
-  f.while(proc { i < n }) {
+  f.while{ i < n }.do {
     c.store(a + b)
     a.store(b)
     b.store(c)
