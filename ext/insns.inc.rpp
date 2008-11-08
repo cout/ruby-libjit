@@ -184,7 +184,6 @@ insns = [
   [ 'push'                 , _, V       ] ,
   [ 'push_ptr'             , _, V, T    ] ,
   [ 'pop_stack'            , _, N       ] ,
-  [ 'stack_top'            , V          ] ,
 ]
 
 insns.each do |name, retval_type, *arg_types|
