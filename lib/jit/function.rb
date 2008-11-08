@@ -118,7 +118,7 @@ module JIT
 
     # Usage:
     #
-    #   until({ <condition> }.do {
+    #   until { <condition> }.do {
     #     # loop body
     #   } .end
     #
