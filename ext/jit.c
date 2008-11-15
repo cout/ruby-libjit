@@ -2,6 +2,10 @@
 #define _GNU_SOURCE
 #endif
 
+#ifdef NEED_WINDOWS_H
+#include <windows.h>
+#endif
+
 #include <ruby.h>
 
 #include <stdio.h>

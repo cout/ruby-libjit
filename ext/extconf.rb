@@ -1,6 +1,14 @@
 require 'mkmf'
+require 'rbconfig'
 
-if not have_library('jit', 'jit_init', ["jit/jit.h"]) then
+if Config::CONFIG['host_os'] =~ /cygwin|win32|windows/ then
+  need_windows_h = [ 'windows.h' ]
+  $defs << ' -DNEED_WINDOWS_H'
+else
+  need_windows_h = [ ]
+end
+
+if not have_library('jit', 'jit_init', need_windows_h + ["jit/jit.h"]) then
   $stderr.puts "libjit not found"
   exit 1
 end
