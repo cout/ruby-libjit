@@ -78,6 +78,10 @@ module JIT
     class Instance < JIT::Value
       attr_reader :array_type
       attr_reader :type
+
+      # A pointer to the first element of the array.  Note that this
+      # differs from +address+, which returns the address of a pointer
+      # to the array.
       attr_reader :ptr
 
       # TODO: This breaks code below?
