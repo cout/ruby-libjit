@@ -129,7 +129,3 @@ module JIT
   end
 end
 
-if __FILE__ == $0 then
-  a = JIT::Array.new()
-end
-

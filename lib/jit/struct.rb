@@ -156,8 +156,3 @@ module JIT
   end
 end
 
-if __FILE__ == $0 then
-  s = JIT::Struct.new()
-  p s
-end
-
