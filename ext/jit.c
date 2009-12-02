@@ -1008,7 +1008,7 @@ static VALUE wrap_type(jit_type_t type)
 
 /*
  * call-seq:
- *   type = Type.create_signature(abi, return_type, array_of_param_types)
+ *   type = Type._create_signature(abi, return_type, array_of_param_types)
  *
  * Create a new signature.
  */
@@ -1465,7 +1465,7 @@ void Init_jit()
   rb_define_method(rb_cFunction, "compiled?", function_is_compiled, 0);
 
   rb_cType = rb_define_class_under(rb_mJIT, "Type", rb_cObject);
-  rb_define_singleton_method(rb_cType, "create_signature", type_s_create_signature, 3);
+  rb_define_singleton_method(rb_cType, "_create_signature", type_s_create_signature, 3);
   rb_define_singleton_method(rb_cType, "create_struct", type_s_create_struct, 1);
   rb_define_singleton_method(rb_cType, "create_pointer", type_s_create_pointer, 1);
   rb_define_method(rb_cType, "get_offset", type_get_offset, 1);
