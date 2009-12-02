@@ -2,7 +2,7 @@ require 'enumerator'
 
 spec = Gem::Specification.new do |s|
   s.name = 'ruby-libjit'
-  s.version = '0.1.0'
+  s.version = '0.2.0'
   s.summary = 'A wrapper for the libjit library'
   s.homepage = 'http://ruby-libjit.rubyforge.org'
   s.rubyforge_project = 'ruby-libjit'
@@ -10,7 +10,10 @@ spec = Gem::Specification.new do |s|
   s.email = 'curlypaul924@gmail.com'
 
   s.description = <<-END
-A wrapper for the libjit library
+Ruby-libjit is a wrapper for the libjit library.  Libjit is a
+lightweight library for building just-in-time compilers.  Ruby-libjit
+includes both a wrapper for libjit and a minimal DSL for building loops
+and control structures.
   END
 
 
