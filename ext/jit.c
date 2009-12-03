@@ -182,6 +182,22 @@ static VALUE context_build(VALUE self)
 #endif
 }
 
+static VALUE function_s_compile(int argc, VALUE * argv, VALUE klass);
+
+/* 
+ * call-seq:
+ *   function = context.compile_function(signature) { |f| ... }
+ *
+ * Acquire a lock on the context so it can be used to build a function.
+ */
+static VALUE context_compile_function(VALUE self, VALUE signature)
+{
+  /* TODO: support passing in parent function */
+  VALUE argv[] = { self, signature };
+  int argc = 2;
+  return function_s_compile(argc, argv, rb_cFunction);
+}
+
 /*
  * call-seq:
  *   Context.build { |context| ... }
@@ -1449,6 +1465,7 @@ void Init_jit()
   rb_cContext = rb_define_class_under(rb_mJIT, "Context", rb_cObject);
   rb_define_singleton_method(rb_cContext, "new", context_s_new, 0);
   rb_define_method(rb_cContext, "build", context_build, 0);
+  rb_define_method(rb_cContext, "compile_function", context_compile_function, 1);
   rb_define_singleton_method(rb_cContext, "build", context_s_build, 0);
 
   rb_cClosure = rb_define_class_under(rb_mJIT, "Closure", rb_cObject);
