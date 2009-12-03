@@ -2,8 +2,7 @@ require 'jit'
 
 function = nil
 JIT::Context.build do |context|
-  signature = JIT::Type.create_signature([ :INT ] => :INT)
-  function = JIT::Function.compile(context, signature) do |f|
+  function = JIT::Function.compile(context, [:INT] => :INT) do |f|
     value = f.get_param(0)
     f.insn_return(value)
   end

@@ -259,6 +259,19 @@ static VALUE create_function(int argc, VALUE * argv, VALUE klass)
 
   rb_scan_args(argc, argv, "21", &context_v, &signature_v, &parent_function_v);
 
+  /* Allow the user to specific the signature as a hash */
+  if (TYPE(signature_v) == T_HASH)
+  {
+    signature_v = rb_funcall(
+        rb_cType,
+        rb_intern("create_signature"),
+        1,
+        signature_v);
+  }
+
+  check_type("context", rb_cContext, context_v);
+  check_type("signature", rb_cType, signature_v);
+
   Data_Get_Struct(context_v, struct _jit_context, context);
   Data_Get_Struct(signature_v, struct _jit_type, signature);
 
