@@ -1,11 +1,13 @@
 require 'jit'
 
-function = nil
+multiply = nil
 JIT::Context.build do |context|
-  function = context.compile_function([:INT] => :INT) do |f|
-    value = f.get_param(0)
-    f.insn_return(value)
+  multiply = context.compile_function([:INT, :INT] => :INT) do |f|
+    lhs = f.get_param(0)
+    rhs = f.get_param(1)
+    result = f.insn_mul(lhs, rhs)
+    f.insn_return(result)
   end
 end
 
-p function.apply(42) #=> 42
+p multiply.apply(6, 7) #=> 42
