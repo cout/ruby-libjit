@@ -1,8 +1,8 @@
 require 'jit'
 
 multiply = JIT::Function.build([:INT, :INT] => :INT) do |f|
-  lhs = f.get_param(0)
-  rhs = f.get_param(1)
+  lhs = f.param(0)
+  rhs = f.param(1)
   f.return(lhs * rhs)
 end
 
