@@ -1,11 +1,6 @@
 require 'jit'
 
-fib = nil
-signature = JIT::Type.create_signature(
-    :CDECL,
-    :INT,
-    [ :INT ])
-fib = JIT::Function.build(signature) do |f|
+fib = JIT::Function.build([:INT] => :INT) do |f|
   n = f.param(0)
 
   a = f.value(:INT, 0)
