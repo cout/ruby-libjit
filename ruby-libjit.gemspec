@@ -2,7 +2,7 @@ require 'enumerator'
 
 spec = Gem::Specification.new do |s|
   s.name = 'ruby-libjit'
-  s.version = '0.2.0'
+  s.version = File.read('VERSION').chomp
   s.summary = 'A wrapper for the libjit library'
   s.homepage = 'http://ruby-libjit.rubyforge.org'
   s.rubyforge_project = 'ruby-libjit'
@@ -18,6 +18,7 @@ and control structures.
 
 
   patterns = [
+    'VERSION'
     'COPYING',
     'LGPL',
     'LICENSE',

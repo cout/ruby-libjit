@@ -1,5 +1,7 @@
-Ruby-libjit 0.2.0
-Copyright (C) 2008 Paul Brannan
+Ruby-libjit
+:include: VERSION
+
+Copyright (C) 2009 Paul Brannan
 
 Ruby-libjit is a wrapper for the libjit library.  It provides basic
 functionality for jit-compiling functions, including integrating those
