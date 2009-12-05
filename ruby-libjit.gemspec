@@ -18,7 +18,7 @@ and control structures.
 
 
   patterns = [
-    'VERSION'
+    'VERSION',
     'COPYING',
     'LGPL',
     'LICENSE',
