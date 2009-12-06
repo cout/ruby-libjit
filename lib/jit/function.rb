@@ -118,7 +118,7 @@ module JIT
 
     # Usage:
     #
-    #   until { <condition> }.do {
+    #   until { <condition> }.do { |loop|
     #     # loop body
     #   } .end
     #
@@ -133,7 +133,7 @@ module JIT
 
     # Usage:
     #
-    #   while { <condition> }.do {
+    #   while { <condition> }.do { |loop|
     #     # loop body
     #   } .end
     #
