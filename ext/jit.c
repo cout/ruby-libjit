@@ -275,7 +275,7 @@ static VALUE create_function(int argc, VALUE * argv, VALUE klass)
 
   rb_scan_args(argc, argv, "21", &context_v, &signature_v, &parent_function_v);
 
-  /* Allow the user to specific the signature as a hash */
+  /* Allow the user to specify the signature as a hash */
   if (TYPE(signature_v) == T_HASH)
   {
     signature_v = rb_funcall(
