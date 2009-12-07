@@ -77,7 +77,7 @@ if Config::CONFIG['CC'] == 'gcc' then
   $CFLAGS << ' -Wall -g'
 end
 
-create_makefile("jit")
+create_makefile("jit_ext")
 
 append_to_makefile = ''
 

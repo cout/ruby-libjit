@@ -1,4 +1,4 @@
-require 'jit.so'
+require 'jit_ext'
 require 'jit/array'
 require 'jit/function'
 require 'jit/struct'

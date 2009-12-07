@@ -1456,7 +1456,7 @@ static VALUE module_define_jit_method(VALUE klass, VALUE name_v, VALUE function_
  * ---------------------------------------------------------------------------
  */
 
-void Init_jit()
+void Init_jit_ext()
 {
   jit_init();
 
