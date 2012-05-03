@@ -1097,7 +1097,7 @@ static VALUE type_s_create_struct(
     Data_Get_Struct(field, struct _jit_type, fields[j]);
   }
 
-  struct_type = jit_type_create_struct(fields, RARRAY_LEN(fields_v), 1);
+  struct_type = jit_type_create_struct(fields, len, 1);
   return wrap_type_with_klass(struct_type, klass);
 }
 
