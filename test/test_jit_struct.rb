@@ -33,9 +33,19 @@ class TestJitStruct < Test::Unit::TestCase
         [ :foo, JIT::Type::INT ],
         [ :bar, JIT::Type::FLOAT64 ],
         [ :baz, JIT::Type::VOID_PTR ])
-    assert_equal 0, s_type.offset_of(:foo)
-    assert_equal 4, s_type.offset_of(:bar)
-    assert_equal 12, s_type.offset_of(:baz)
+    if JIT::Type::OBJECT.size == 4 then
+      # 32-bit
+      assert_equal 0, s_type.offset_of(:foo)
+      assert_equal 4, s_type.offset_of(:bar)
+      assert_equal 12, s_type.offset_of(:baz)
+    elsif JIT::Type::OBJECT.size == 8 then
+      # 64-bit
+      assert_equal 0, s_type.offset_of(:foo)
+      assert_equal 8, s_type.offset_of(:bar)
+      assert_equal 16, s_type.offset_of(:baz)
+    else
+      raise ArgumentError, "Invalid size for OBJECT: #{JIT::Type::OBJECT.size}"
+    end
   end
 
   def test_type_of
@@ -55,7 +65,10 @@ class TestJitStruct < Test::Unit::TestCase
           [ :bar, JIT::Type::FLOAT64 ],
           [ :baz, JIT::Type::VOID_PTR ])
       s = s_type.create(f)
-      f.insn_store_relative(s.ptr, 4, f.const(JIT::Type::FLOAT64, 42.0))
+      f.insn_store_relative(
+          s.ptr,
+          s_type.offset_of(:bar),
+          f.const(JIT::Type::FLOAT64, 42.0))
       f.return s[:bar]
     }
     assert_function_result(
@@ -70,7 +83,10 @@ class TestJitStruct < Test::Unit::TestCase
           [ :bar, JIT::Type::FLOAT64 ],
           [ :baz, JIT::Type::VOID_PTR ])
       s = s_type.create(f)
-      f.insn_store_relative(s.ptr, 4, f.const(JIT::Type::FLOAT64, 42.0))
+      f.insn_store_relative(
+          s.ptr,
+          s_type.offset_of(:bar),
+          f.const(JIT::Type::FLOAT64, 42.0))
       f.return s.bar
     }
     assert_function_result(

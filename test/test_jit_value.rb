@@ -17,6 +17,17 @@ class TestJitValue < Test::Unit::TestCase
         &p)
   end
 
+  def test_store_float
+    p = proc { |f|
+      v = f.value(JIT::Type::FLOAT64)
+      v.store(f.const(JIT::Type::FLOAT64, 42.0))
+      f.return v
+    }
+    assert_function_result(
+        :result => [ JIT::Type::FLOAT64, 42.0 ],
+        &p)
+  end
+
   # TODO: address
 
   def test_int_plus
