@@ -14,11 +14,6 @@
 #include <jit/jit-dump.h>
 
 #include "rubyjit.h"
-#include "method_data.h"
-
-#ifdef NEED_MINIMAL_NODE
-#include "minimal_node.h"
-#endif
 
 #ifndef RARRAY_LEN
 #define RARRAY_LEN(a) RARRAY(a)->len
@@ -37,6 +32,8 @@ static VALUE rb_cValue;
 static VALUE rb_cLabel;
 static VALUE rb_mCall;
 static VALUE rb_cClosure;
+
+static VALUE closures;
 
 jit_type_t jit_type_VALUE;
 jit_type_t jit_type_ID;
@@ -1446,9 +1443,15 @@ static VALUE module_define_jit_method(VALUE klass, VALUE name_v, VALUE function_
 
   closure_v = function_to_closure(function_v);
   Data_Get_Struct(closure_v, struct Closure, closure);
-  define_method_with_data(
-      klass, rb_intern(name), RUBY_METHOD_FUNC(closure->function_ptr),
-      arity, closure_v);
+
+  /* TODO: This will leak the closure if the method is ever redefined.
+   * I had a solution to this problem, but it became too convoluted to
+   * maintain.
+   */
+  rb_ary_push(closures, closure_v);
+  rb_define_method(
+      klass, name, RUBY_METHOD_FUNC(closure->function_ptr), arity);
+
   return Qnil;
 }
 
@@ -1460,6 +1463,9 @@ static VALUE module_define_jit_method(VALUE klass, VALUE name_v, VALUE function_
 void Init_jit_ext()
 {
   jit_init();
+
+  closures = rb_ary_new();
+  rb_gc_register_address(&closures);
 
   rb_mJIT = rb_define_module("JIT");
 
@@ -1576,9 +1582,5 @@ void Init_jit_ext()
 
   /* VALUE rb_cModule = rb_define_module(); */
   rb_define_method(rb_cModule, "define_jit_method", module_define_jit_method, 2);
-
-#ifdef NEED_MINIMAL_NODE
-  Init_minimal_node();
-#endif
 }
 
