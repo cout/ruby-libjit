@@ -28,6 +28,10 @@ END
 #include <env.h>
 #endif
 
+#ifndef RCLASS_M_TBL
+#define RCLASS_M_TBL(c) (RCLASS(c)->m_tbl)
+#endif
+
 #ifdef RUBY_VM
 
 /* YARV */
@@ -47,6 +51,18 @@ typedef struct rb_thread_struct rb_thread_t;
 #define CFP_DATA_MEMO_NODE_AND_PC cfp[0]
 #define CFP_METHOD_CLASS cfp[11]
 
+static VALUE * get_cfp()
+{
+#ifdef HAVE_TYPE_RB_DATA_TYPE_T
+  VALUE thread = rb_thread_current();
+  rb_thread_t * th = RTYPEDDATA_DATA(thread);
+  VALUE * cfp = th->cfp;
+#else
+  extern rb_thread_t * ruby_current_thread;
+  VALUE * cfp = ruby_current_thread->cfp;
+#endif
+}
+
 /* On YARV, we store the method data on the stack.  We don't have to pop
  * it off the stack, because the stack pointer will be reset to the
  * previous frame's stack pointer when the function returns.
@@ -54,8 +70,7 @@ typedef struct rb_thread_struct rb_thread_t;
 static void fix_frame()
 {
   do {
-    extern rb_thread_t * ruby_current_thread;
-    VALUE * cfp = ruby_current_thread->cfp;
+    VALUE * cfp = get_cfp();
     CFP_DATA_MEMO_NODE_AND_PC = RBASIC(CFP_METHOD_CLASS)->klass;
 
     if(rb_type(CFP_DATA_MEMO_NODE_AND_PC) != T_NODE)
@@ -78,8 +93,7 @@ static void fix_frame()
 
 static NODE * data_memo_node()
 {
-  extern rb_thread_t * ruby_current_thread;
-  VALUE * cfp = ruby_current_thread->cfp;
+  VALUE * cfp = get_cfp();
   return (NODE *)CFP_DATA_MEMO_NODE_AND_PC;
 }
 
