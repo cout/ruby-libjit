@@ -223,8 +223,9 @@ static void mark_closure(struct Closure * closure)
 VALUE closure_to_int(VALUE self)
 {
   struct Closure * closure;
+  VALUE v;
   Data_Get_Struct(self, struct Closure, closure);
-  VALUE v = ULONG2NUM((unsigned long)closure->function_ptr);
+  v = ULONG2NUM((unsigned long)closure->function_ptr);
   return v;
 }
 
@@ -646,7 +647,7 @@ static VALUE function_insn_call(int argc, VALUE * argv, VALUE self)
 
   Data_Get_Struct(self, struct _jit_function, function);
 
-  name = STR2CSTR(name_v);
+  name = StringValuePtr(name_v);
 
   check_type("called function", rb_cFunction, called_function_v);
   Data_Get_Struct(called_function_v, struct _jit_function, called_function);
@@ -712,7 +713,7 @@ static VALUE function_insn_call_native(int argc, VALUE * argv, VALUE self)
   {
     rb_raise(
         rb_eArgError,
-        "Wrong number of arguments passed for %s (expecting %d but got %d)", 
+        "Wrong number of arguments passed for %s (expecting %d but got %zd)", 
         name,
         jit_type_num_params(signature),
         num_args);
@@ -1426,7 +1427,7 @@ static VALUE module_define_jit_method(VALUE klass, VALUE name_v, VALUE function_
   }
   else
   {
-    name = STR2CSTR(name_v);
+    name = StringValuePtr(name_v);
   }
 
   Data_Get_Struct(function_v, struct _jit_function, function);
